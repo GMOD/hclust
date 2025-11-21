@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { printTree, toNewick, treeToJSON } from '../src/tree-utils.js'
+import { fromNewick, printTree, toNewick, treeToJSON } from '../src/tree-utils.js'
 
 import type { ClusterNode } from '../src/types.js'
 
@@ -154,6 +154,86 @@ describe('tree-utils', () => {
 
       const newick = toNewick(node)
       expect(newick).toBe('(A,B)1.2346')
+    })
+  })
+
+  describe('fromNewick', () => {
+    it('should parse a simple leaf node', () => {
+      const newick = 'A;'
+      const tree = fromNewick(newick)
+      expect(tree).toEqual({
+        name: 'A',
+        height: 0,
+      })
+    })
+
+    it('should parse a simple tree with two leaves', () => {
+      const newick = '(A,B);'
+      const tree = fromNewick(newick)
+      expect(tree.children).toHaveLength(2)
+      expect(tree.children?.[0]).toEqual({ name: 'A', height: 0 })
+      expect(tree.children?.[1]).toEqual({ name: 'B', height: 0 })
+    })
+
+    it('should parse branch lengths', () => {
+      const newick = '(A:0.1,B:0.2);'
+      const tree = fromNewick(newick)
+      expect(tree.children?.[0]?.height).toBe(0.1)
+      expect(tree.children?.[1]?.height).toBe(0.2)
+    })
+
+    it('should parse nested structure', () => {
+      const newick = '((A,B),C);'
+      const tree = fromNewick(newick)
+      expect(tree.children).toHaveLength(2)
+      expect(tree.children?.[0]?.children).toHaveLength(2)
+      expect(tree.children?.[0]?.children?.[0]?.name).toBe('A')
+      expect(tree.children?.[0]?.children?.[1]?.name).toBe('B')
+      expect(tree.children?.[1]?.name).toBe('C')
+    })
+
+    it('should parse internal node names and heights', () => {
+      const newick = '((A,B)E:0.5,C);'
+      const tree = fromNewick(newick)
+      expect(tree.children?.[0]?.name).toBe('E')
+      expect(tree.children?.[0]?.height).toBe(0.5)
+    })
+
+    it('should round-trip with toNewick', () => {
+      const original: ClusterNode = {
+        name: '',
+        height: 2.0,
+        children: [
+          {
+            name: '',
+            height: 1.0,
+            children: [
+              { name: 'A', height: 0 },
+              { name: 'B', height: 0 },
+            ],
+          },
+          { name: 'C', height: 0 },
+        ],
+      }
+
+      const newick = toNewick(original)
+      const parsed = fromNewick(newick)
+      expect(parsed.children?.[0]?.children?.[0]?.name).toBe('A')
+      expect(parsed.children?.[0]?.children?.[1]?.name).toBe('B')
+      expect(parsed.children?.[1]?.name).toBe('C')
+    })
+
+    it('should handle complex Wikipedia example', () => {
+      const newick = '(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;'
+      const tree = fromNewick(newick)
+      expect(tree.name).toBe('F')
+      expect(tree.children).toHaveLength(3)
+      expect(tree.children?.[0]).toEqual({ name: 'A', height: 0.1 })
+      expect(tree.children?.[1]).toEqual({ name: 'B', height: 0.2 })
+      expect(tree.children?.[2]?.name).toBe('E')
+      expect(tree.children?.[2]?.height).toBe(0.5)
+      expect(tree.children?.[2]?.children?.[0]).toEqual({ name: 'C', height: 0.3 })
+      expect(tree.children?.[2]?.children?.[1]).toEqual({ name: 'D', height: 0.4 })
     })
   })
 

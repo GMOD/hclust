@@ -11,11 +11,12 @@ WebAssembly, with JavaScript/TypeScript wrappers for easy integration.
 - Multiple output formats including Newick, JSON, and tree visualization
 - Includes the ability to cancel the calculation when it's running in a web
   worker using synchronous XHR (something that is allowable)
+- Adds a couple utilities for parsing and serializing to newick format
 
 ## Usage
 
 ```typescript
-import { clusterData, printTree, toNewick } from '@gmod/hclust'
+import { clusterData, printTree, toNewick, fromNewick } from '@gmod/hclust'
 
 const data = [
   [1.0, 2.0, 3.0],
@@ -30,6 +31,7 @@ printTree(result.tree, ['Sample A', 'Sample B', 'Sample C'])
 
 // Get Newick format
 const newick = toNewick(result.tree)
+const tree = fromNewick(newick)
 ```
 
 ## Note
