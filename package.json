@@ -10,11 +10,9 @@
   ],
   "license": "Apache-2.0",
   "homepage": "https://jbrowse.org",
-  "bugs": "https://github.com/GMOD/jbrowse-components/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GMOD/jbrowse-components.git",
-    "directory": "packages/clustering"
+    "url": "https://github.com/GMOD/hclust.git"
   },
   "author": "JBrowse Team",
   "type": "module",
@@ -36,6 +34,7 @@
   "scripts": {
     "test": "cd ../..; jest --passWithNoTests packages/clustering",
     "coverage": "yarn test --coverage",
+    "lint": "eslint --report-unused-disable-directives --max-warnings 0",
     "clean": "rimraf dist esm tsconfig.build.tsbuildinfo",
     "prebuild": "yarn clean",
     "build:wasm": "bash scripts/build_wasm.sh",
@@ -48,5 +47,12 @@
   "dependencies": {},
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.1",
+    "eslint-plugin-import": "^2.32.0",
+    "rimraf": "^6.1.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.47.0"
   }
 }

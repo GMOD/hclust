@@ -1,10 +1,18 @@
 {
-  "extends": "../../tsconfig.json",
+  "include": ["src"],
   "compilerOptions": {
-    "outDir": "dist/",
-    "rootDir": "src/",
-    "module": "commonjs"
-  },
-  "include": ["src/**/*"],
-  "exclude": ["**/*.test.ts*", "**/*.test.js*", "dist", "esm", "example.js"]
+    "outDir": "dist",
+    "target": "es2020",
+    "lib": ["dom", "esnext"],
+    "declaration": true,
+    "moduleResolution": "node",
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "esModuleInterop": true
+  }
 }
