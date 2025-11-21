@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { hierarchicalClusterWasm } from './wasm-wrapper.js'
+import { hierarchicalClusterWasm } from '../src/wasm-wrapper.js'
 
 const mockModule = {
   _malloc: vi.fn(),
@@ -13,7 +13,7 @@ const mockModule = {
   HEAP32: new Int32Array(1000),
 }
 
-vi.mock('./distance.js', () => ({
+vi.mock('../src/distance.js', () => ({
   default: vi.fn(() => Promise.resolve(mockModule)),
 }))
 
@@ -388,7 +388,8 @@ describe('wasm-wrapper', () => {
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
-    const createModuleMock = (await import('./distance.js')).default
+    // @ts-expect-error
+    const createModuleMock = (await import('../src/distance.js')).default
     const initialCallCount = vi.mocked(createModuleMock).mock.calls.length
 
     await hierarchicalClusterWasm({ data })

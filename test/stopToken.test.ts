@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { checkStopToken } from './stopToken.js'
+import { checkStopToken } from '../src/stopToken.js'
 
 describe('stopToken', () => {
   describe('checkStopToken', () => {

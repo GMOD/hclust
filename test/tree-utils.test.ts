@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { printTree, toNewick, treeToJSON } from './tree-utils.js'
+import { printTree, toNewick, treeToJSON } from '../src/tree-utils.js'
 
-import type { ClusterNode } from './types.js'
+import type { ClusterNode } from '../src/types.js'
 
 describe('tree-utils', () => {
   describe('printTree', () => {

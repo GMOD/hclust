@@ -1,30 +1,21 @@
-# @jbrowse/clustering
-
-High-performance hierarchical clustering using WebAssembly.
+# @gmod/hclust
 
 This package provides fast hierarchical clustering algorithms compiled from C to
 WebAssembly, with JavaScript/TypeScript wrappers for easy integration.
 
 ## Features
 
-- **Fast distance matrix computation** using WASM (40-72% faster than pure
-  JavaScript)
-- **Float32 precision** for memory efficiency
-- **Hierarchical clustering** with average linkage
-- **Multiple output formats** including Newick, JSON, and tree visualization
-
-## Performance
-
-Based on benchmarks, WASM implementation provides:
-
-- 40-72% speedup for distance matrix computation
-- Efficient memory usage with Float32Array
-- No JIT warmup needed
+- Fast distance matrix computation using WASM
+- Float32 precision for memory efficiency
+- Hierarchical clustering with average linkage
+- Multiple output formats including Newick, JSON, and tree visualization
+- Includes the ability to cancel the calculation when it's running in a web
+  worker using synchronous XHR (something that is allowable)
 
 ## Usage
 
 ```typescript
-import { clusterData, printTree, toNewick } from '@jbrowse/clustering'
+import { clusterData, printTree, toNewick } from '@gmod/hclust'
 
 const data = [
   [1.0, 2.0, 3.0],
@@ -40,3 +31,8 @@ printTree(result.tree, ['Sample A', 'Sample B', 'Sample C'])
 // Get Newick format
 const newick = toNewick(result.tree)
 ```
+
+## Note
+
+Generated with the help of Claude Code AI, you might be able to tell from the
+somewhat robotic documentation
