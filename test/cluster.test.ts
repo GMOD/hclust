@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { clusterData } from '../src/cluster.js'
+import { hierarchicalClusterWasm } from '../src/wasm-wrapper.js'
 
 vi.mock('../src/wasm-wrapper.js', () => ({
   hierarchicalClusterWasm: vi.fn(),
 }))
-
-import { hierarchicalClusterWasm } from '../src/wasm-wrapper.js'
 
 describe('clusterData', () => {
   it('should call hierarchicalClusterWasm with correct parameters', async () => {

@@ -9,6 +9,7 @@ export default defineConfig(
       'webpack.config.js',
       'benchmarks/*',
       'dist/*',
+      'vitest.config.ts',
       'esm/*',
       'example/*',
       'eslint.config.mjs',
