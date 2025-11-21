@@ -1,15 +1,14 @@
 {
-  "name": "@gmod/clustering",
+  "name": "@gmod/hclust",
   "version": "3.7.0",
-  "description": "Hierarchical clustering with WASM",
+  "description": "Hierarchical clustering",
   "keywords": [
     "jbrowse",
     "clustering",
     "wasm",
     "hierarchical-clustering"
   ],
-  "license": "Apache-2.0",
-  "homepage": "https://jbrowse.org",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/GMOD/hclust.git"
@@ -32,8 +31,9 @@
     "esm"
   ],
   "scripts": {
-    "test": "cd ../..; jest --passWithNoTests packages/clustering",
-    "coverage": "yarn test --coverage",
+    "format": "prettier --write .",
+    "test": "vitest",
+    "coverage": "vitest run --coverage",
     "lint": "eslint --report-unused-disable-directives --max-warnings 0",
     "clean": "rimraf dist esm tsconfig.build.tsbuildinfo",
     "prebuild": "yarn clean",
@@ -51,8 +51,10 @@
   "devDependencies": {
     "eslint": "^9.39.1",
     "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.6.2",
     "rimraf": "^6.1.2",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.47.0"
+    "typescript-eslint": "^8.47.0",
+    "vitest": "^4.0.13"
   }
 }

@@ -39,8 +39,7 @@ function isWebWorker() {
 
 export function checkStopToken(stopToken: string | undefined) {
   // avoid doing synchronous XHR on main thread
-  // @ts-expect-error
-  if (typeof jest === 'undefined' && stopToken !== undefined && isWebWorker()) {
+  if (stopToken !== undefined && isWebWorker()) {
     const xhr = new XMLHttpRequest()
 
     // synchronous XHR usage to check the token
