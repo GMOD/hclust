@@ -92,7 +92,7 @@ export async function hierarchicalClusterWasm(
     )
 
     if (result === -1) {
-      throw new Error('Clustering cancelled')
+      throw new Error('aborted')
     }
 
     // Copy results back

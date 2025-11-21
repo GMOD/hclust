@@ -110,7 +110,7 @@ describe('wasm-wrapper', () => {
     mockModule.HEAP32.fill(0)
 
     await expect(hierarchicalClusterWasm({ data })).rejects.toThrow(
-      'Clustering cancelled',
+      'aborted',
     )
   })
 
