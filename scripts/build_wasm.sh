@@ -26,6 +26,9 @@ emcc distance.c \
   -s ALLOW_TABLE_GROWTH=1 \
   -o distance.js
 
+sed -i.bak 's/var _scriptName=import\.meta\.url;/var _scriptName="";/' distance.js
+rm distance.js.bak
+
 echo "WASM module built successfully!"
 echo "Output file (with inlined WASM):"
 echo "  - src/wasm/distance.js"
