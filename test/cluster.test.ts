@@ -103,7 +103,7 @@ describe('clusterData', () => {
     )
   })
 
-  it('should create checkCancellation callback when stopToken is provided', async () => {
+  it('should pass checkCancellation callback to wasm wrapper', async () => {
     const mockWasmResult = {
       tree: { name: 'Root', height: 0 },
       order: [0],
@@ -113,15 +113,14 @@ describe('clusterData', () => {
 
     vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
 
-    const stopToken = 'test-token'
+    const checkCancellation = vi.fn(() => false)
     const data = [[1, 2]]
 
-    await clusterData({ data, stopToken })
+    await clusterData({ data, checkCancellation })
 
     const calls = vi.mocked(hierarchicalClusterWasm).mock.calls
     const call = calls[calls.length - 1]?.[0]
-    expect(call?.checkCancellation).toBeDefined()
-    expect(typeof call?.checkCancellation).toBe('function')
+    expect(call?.checkCancellation).toBe(checkCancellation)
   })
 
   it('should build clustersGivenK correctly for 2 samples', async () => {
@@ -272,7 +271,7 @@ describe('clusterData', () => {
     expect(result.clustersGivenK[result.clustersGivenK.length - 1]).toEqual([])
   })
 
-  it('checkCancellation should return false when no error is thrown', async () => {
+  it('checkCancellation returning false means not cancelled', async () => {
     const mockWasmResult = {
       tree: { name: 'Root', height: 0 },
       order: [0],
@@ -282,13 +281,12 @@ describe('clusterData', () => {
 
     vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
 
+    const checkCancellation = vi.fn(() => false)
     const data = [[1, 2]]
-    await clusterData({ data, stopToken: 'token' })
+    await clusterData({ data, checkCancellation })
 
     const calls = vi.mocked(hierarchicalClusterWasm).mock.calls
     const call = calls[calls.length - 1]?.[0]
-    const checkCancellation = call?.checkCancellation
-
-    expect(checkCancellation?.()).toBe(false)
+    expect(call?.checkCancellation?.()).toBe(false)
   })
 })
