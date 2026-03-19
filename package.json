@@ -1,6 +1,6 @@
 {
   "name": "@gmod/hclust",
-  "version": "1.0.7",
+  "version": "2.0.0",
   "description": "Hierarchical clustering",
   "keywords": [
     "jbrowse",
@@ -41,7 +41,7 @@
     "build": "yarn build:wasm && yarn build:esm && yarn build:cjs",
     "prebuild": "yarn clean",
     "postbuild": "echo '{\"type\": \"commonjs\"}' > dist/package.json",
-    "preversion": "yarn lint && yarn test --run && yarn build",
+    "preversion": "yarn lint && yarn build && yarn test --run",
     "postversion": "git push --follow-tags"
   },
   "dependencies": {},
