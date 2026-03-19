@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { fromNewick, printTree, toNewick, treeToJSON } from '../src/tree-utils.js'
+import {
+  fromNewick,
+  printTree,
+  toNewick,
+  treeToJSON,
+} from '../src/tree-utils.js'
 
 import type { ClusterNode } from '../src/types.js'
 
@@ -232,8 +237,14 @@ describe('tree-utils', () => {
       expect(tree.children?.[1]).toEqual({ name: 'B', height: 0.2 })
       expect(tree.children?.[2]?.name).toBe('E')
       expect(tree.children?.[2]?.height).toBe(0.5)
-      expect(tree.children?.[2]?.children?.[0]).toEqual({ name: 'C', height: 0.3 })
-      expect(tree.children?.[2]?.children?.[1]).toEqual({ name: 'D', height: 0.4 })
+      expect(tree.children?.[2]?.children?.[0]).toEqual({
+        name: 'C',
+        height: 0.3,
+      })
+      expect(tree.children?.[2]?.children?.[1]).toEqual({
+        name: 'D',
+        height: 0.4,
+      })
     })
   })
 

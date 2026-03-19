@@ -109,9 +109,7 @@ describe('wasm-wrapper', () => {
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
-    await expect(hierarchicalClusterWasm({ data })).rejects.toThrow(
-      'aborted',
-    )
+    await expect(hierarchicalClusterWasm({ data })).rejects.toThrow('aborted')
   })
 
   it('should build tree from merge information', async () => {
