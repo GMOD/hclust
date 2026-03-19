@@ -8,23 +8,29 @@ export async function clusterData({
   sampleLabels,
   onProgress,
   stopToken,
+  checkCancellation,
 }: ClusterOptions): Promise<ClusterResult> {
   onProgress?.('Running hierarchical clustering in WASM...')
+
+  // Prefer the callback; fall back to legacy stopToken-based XHR check
+  const cancellationCheck =
+    checkCancellation ??
+    (stopToken
+      ? () => {
+          try {
+            checkStopToken(stopToken)
+            return false
+          } catch {
+            return true
+          }
+        }
+      : undefined)
 
   const result = await hierarchicalClusterWasm({
     data,
     sampleLabels,
     statusCallback: onProgress,
-    checkCancellation: stopToken
-      ? () => {
-          try {
-            checkStopToken(stopToken)
-            return false
-          } catch (e) {
-            return true
-          }
-        }
-      : undefined,
+    checkCancellation: cancellationCheck,
   })
 
   // Build clustersGivenK from merge information
