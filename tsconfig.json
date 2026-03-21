@@ -6,7 +6,7 @@
     "lib": ["dom", "esnext"],
     "skipLibCheck": true,
     "declaration": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": true,
     "allowJs": true,
     "noImplicitReturns": true,
