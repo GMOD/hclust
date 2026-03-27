@@ -7,6 +7,8 @@
     "skipLibCheck": true,
     "declaration": true,
     "moduleResolution": "bundler",
+    "module": "esnext",
+    "rootDir": "./src",
     "strict": true,
     "allowJs": true,
     "noImplicitReturns": true,
