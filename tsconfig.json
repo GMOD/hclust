@@ -1,15 +1,10 @@
 {
-  "include": [
-    "src"
-  ],
+  "include": ["src"],
   "compilerOptions": {
     "outDir": "dist",
     "target": "es2020",
-    "lib": [
-      "dom",
-      "esnext"
-    ],
-    "skipLibCheck": true,
+    "lib": ["dom", "esnext"],
+    "skipLibCheck": false,
     "declaration": true,
     "moduleResolution": "nodenext",
     "module": "nodenext",
