@@ -37,7 +37,7 @@
     "format": "prettier --write .",
     "build:wasm": "bash scripts/build_wasm.sh && cp src/wasm/distance.js src/wasm/distance.d.ts src/",
     "build:esm": "tsc --module esnext --outDir esm",
-    "build:cjs": "tsc --module commonjs --outDir dist",
+    "build:cjs": "tsc --module commonjs --moduleResolution bundler --outDir dist",
     "build": "yarn build:wasm && yarn build:esm && yarn build:cjs",
     "prebuild": "yarn clean",
     "postbuild": "echo '{\"type\": \"commonjs\"}' > dist/package.json",
