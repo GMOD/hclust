@@ -15,5 +15,5 @@ export interface ClusterOptions {
   data: number[][]
   sampleLabels?: string[]
   onProgress?: (message: string) => void
-  checkCancellation?: () => boolean
+  checkCancellation?: () => void
 }

@@ -24,7 +24,7 @@ export interface ClusteringOptions {
   data: number[][]
   sampleLabels?: string[]
   statusCallback?: (message: string) => void
-  checkCancellation?: () => boolean
+  checkCancellation?: () => void
 }
 
 export async function hierarchicalClusterWasm(
@@ -59,9 +59,7 @@ export async function hierarchicalClusterWasm(
     // Set up progress callback if provided
     if (statusCallback || checkCancellation) {
       const progressCallback = (iteration: number, totalIterations: number) => {
-        if (checkCancellation?.()) {
-          return 0 // Cancel
-        }
+        checkCancellation?.()
         if (statusCallback) {
           // Negative iteration indicates distance matrix phase
           if (iteration < 0) {
@@ -90,10 +88,6 @@ export async function hierarchicalClusterWasm(
       mergeBPtr,
       orderPtr,
     )
-
-    if (result === -1) {
-      throw new Error('aborted')
-    }
 
     // Copy results back
     const heights = new Float32Array(numSamples - 1)

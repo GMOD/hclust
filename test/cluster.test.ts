@@ -113,7 +113,7 @@ describe('clusterData', () => {
 
     vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
 
-    const checkCancellation = vi.fn(() => false)
+    const checkCancellation = vi.fn()
     const data = [[1, 2]]
 
     await clusterData({ data, checkCancellation })
@@ -271,22 +271,14 @@ describe('clusterData', () => {
     expect(result.clustersGivenK[result.clustersGivenK.length - 1]).toEqual([])
   })
 
-  it('checkCancellation returning false means not cancelled', async () => {
-    const mockWasmResult = {
-      tree: { name: 'Root', height: 0 },
-      order: [0],
-      heights: new Float32Array([]),
-      merges: [] as [number, number][],
-    }
+  it('should propagate error thrown by checkCancellation', async () => {
+    vi.mocked(hierarchicalClusterWasm).mockRejectedValue(new Error('aborted'))
 
-    vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
-
-    const checkCancellation = vi.fn(() => false)
+    const checkCancellation = vi.fn(() => {
+      throw new Error('aborted')
+    })
     const data = [[1, 2]]
-    await clusterData({ data, checkCancellation })
 
-    const calls = vi.mocked(hierarchicalClusterWasm).mock.calls
-    const call = calls[calls.length - 1]?.[0]
-    expect(call?.checkCancellation?.()).toBe(false)
+    await expect(clusterData({ data, checkCancellation })).rejects.toThrow('aborted')
   })
 })

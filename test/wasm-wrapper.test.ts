@@ -102,14 +102,30 @@ describe('wasm-wrapper', () => {
     )
   })
 
-  it('should throw error if clustering is cancelled', async () => {
+  it('should propagate error thrown by checkCancellation', async () => {
     const data = [[1, 2]]
 
-    mockModule._hierarchicalCluster.mockReturnValue(-1)
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
-    await expect(hierarchicalClusterWasm({ data })).rejects.toThrow('aborted')
+    let capturedCallback: ((iter: number, total: number) => number) | undefined
+    mockModule.addFunction.mockImplementation(
+      (fn: (iter: number, total: number) => number) => {
+        capturedCallback = fn
+        return 12345
+      },
+    )
+    mockModule._hierarchicalCluster.mockImplementation(() => {
+      capturedCallback?.(1, 10)
+      return 0
+    })
+
+    const checkCancellation = vi.fn(() => {
+      throw new Error('aborted')
+    })
+
+    await expect(hierarchicalClusterWasm({ data, checkCancellation })).rejects.toThrow('aborted')
+    expect(mockModule._free).toHaveBeenCalledTimes(5)
   })
 
   it('should build tree from merge information', async () => {
@@ -279,7 +295,7 @@ describe('wasm-wrapper', () => {
 
   it('should setup progress callback when checkCancellation is provided', async () => {
     const data = [[1, 2]]
-    const checkCancellation = vi.fn(() => false)
+    const checkCancellation = vi.fn()
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
@@ -303,28 +319,57 @@ describe('wasm-wrapper', () => {
     expect(mockModule._setProgressCallback).toHaveBeenCalledWith(0)
   })
 
-  it('should cleanup memory even if clustering throws error', async () => {
+  it('should cleanup memory even if checkCancellation throws', async () => {
     const data = [[1, 2]]
 
-    mockModule._hierarchicalCluster.mockReturnValue(-1)
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
-    await expect(hierarchicalClusterWasm({ data })).rejects.toThrow()
+    let capturedCallback: ((iter: number, total: number) => number) | undefined
+    mockModule.addFunction.mockImplementation(
+      (fn: (iter: number, total: number) => number) => {
+        capturedCallback = fn
+        return 12345
+      },
+    )
+    mockModule._hierarchicalCluster.mockImplementation(() => {
+      capturedCallback?.(1, 10)
+      return 0
+    })
+
+    const checkCancellation = vi.fn(() => {
+      throw new Error('aborted')
+    })
+
+    await expect(hierarchicalClusterWasm({ data, checkCancellation })).rejects.toThrow()
 
     expect(mockModule._free).toHaveBeenCalledTimes(5)
   })
 
-  it('should cleanup callback even if clustering throws error', async () => {
+  it('should cleanup callback even if checkCancellation throws', async () => {
     const data = [[1, 2]]
-    const statusCallback = vi.fn()
 
-    mockModule._hierarchicalCluster.mockReturnValue(-1)
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
+    let capturedCallback: ((iter: number, total: number) => number) | undefined
+    mockModule.addFunction.mockImplementation(
+      (fn: (iter: number, total: number) => number) => {
+        capturedCallback = fn
+        return 12345
+      },
+    )
+    mockModule._hierarchicalCluster.mockImplementation(() => {
+      capturedCallback?.(1, 10)
+      return 0
+    })
+
+    const checkCancellation = vi.fn(() => {
+      throw new Error('aborted')
+    })
+
     await expect(
-      hierarchicalClusterWasm({ data, statusCallback }),
+      hierarchicalClusterWasm({ data, checkCancellation }),
     ).rejects.toThrow()
 
     expect(mockModule.removeFunction).toHaveBeenCalledWith(12345)
