@@ -28,29 +28,40 @@ matrix; this library computes Euclidean distances from raw vectors internally.
 ## Usage
 
 ```typescript
-import { clusterData, printTree, toNewick, fromNewick } from '@gmod/hclust'
+import { clusterObject, toNewick, fromNewick } from '@gmod/hclust'
 
-const data = [
-  [1.0, 2.0, 3.0],
-  [1.5, 2.5, 3.5],
-  [10.0, 11.0, 12.0],
-]
+const result = await clusterObject({
+  data: {
+    'Sample A': [1.0, 2.0, 3.0],
+    'Sample B': [1.5, 2.5, 3.5],
+    'Sample C': [10.0, 11.0, 12.0],
+  },
+})
 
-const result = await clusterData({ data })
-
-// Print tree structure
-printTree(result.tree, ['Sample A', 'Sample B', 'Sample C'])
-
-// Get Newick format
 const newick = toNewick(result.tree)
 const tree = fromNewick(newick)
+```
+
+`clusterData` is also available if you have separate arrays:
+
+```typescript
+import { clusterData } from '@gmod/hclust'
+
+const result = await clusterData({
+  data: [
+    [1.0, 2.0, 3.0],
+    [1.5, 2.5, 3.5],
+    [10.0, 11.0, 12.0],
+  ],
+  sampleLabels: ['Sample A', 'Sample B', 'Sample C'],
+})
 ```
 
 ## Cancellation
 
 `clusterData` accepts an optional `checkCancellation: () => void` callback,
-called periodically during the WASM computation. Throw from it to cancel —
-the error propagates out of `clusterData`.
+called periodically during the WASM computation. Throw from it to cancel — the
+error propagates out of `clusterData`.
 
 ```typescript
 clusterData({
@@ -101,9 +112,9 @@ Cross-Origin-Embedder-Policy: require-corp
 
 ### Blob URL + synchronous XHR (web workers only)
 
-Without cross-origin isolation, use a blob URL as a cancellation token.
-Revoking the URL causes a synchronous XHR to it to throw, signalling
-cancellation. Synchronous XHR is only permitted in web workers.
+Without cross-origin isolation, use a blob URL as a cancellation token. Revoking
+the URL causes a synchronous XHR to it to throw, signalling cancellation.
+Synchronous XHR is only permitted in web workers.
 
 ```typescript
 const token = URL.createObjectURL(new Blob())
@@ -126,10 +137,10 @@ clusterData({
 
 ### Summary
 
-| Approach | Works on main thread | Works in web worker | Requires cross-origin isolation |
-|---|---|---|---|
-| SharedArrayBuffer + Atomics | yes | yes | yes |
-| Blob URL + sync XHR | no | yes | no |
+| Approach                    | Works on main thread | Works in web worker | Requires cross-origin isolation |
+| --------------------------- | -------------------- | ------------------- | ------------------------------- |
+| SharedArrayBuffer + Atomics | yes                  | yes                 | yes                             |
+| Blob URL + sync XHR         | no                   | yes                 | no                              |
 
 ## Note
 

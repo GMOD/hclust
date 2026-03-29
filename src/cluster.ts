@@ -1,6 +1,10 @@
 import { hierarchicalClusterWasm } from './wasm-wrapper.js'
 
-import type { ClusterOptions, ClusterResult } from './types.js'
+import type {
+  ClusterObjectOptions,
+  ClusterOptions,
+  ClusterResult,
+} from './types.js'
 
 export async function clusterData({
   data,
@@ -54,4 +58,18 @@ export async function clusterData({
     order: result.order,
     clustersGivenK: clustersGivenK.reverse(),
   }
+}
+
+export async function clusterObject({
+  data,
+  onProgress,
+  checkCancellation,
+}: ClusterObjectOptions) {
+  const sampleLabels = Object.keys(data)
+  return clusterData({
+    data: Object.values(data),
+    sampleLabels,
+    onProgress,
+    checkCancellation,
+  })
 }

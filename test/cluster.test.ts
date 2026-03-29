@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { clusterData } from '../src/cluster.js'
+import { clusterData, clusterObject } from '../src/cluster.js'
 import { hierarchicalClusterWasm } from '../src/wasm-wrapper.js'
 
 vi.mock('../src/wasm-wrapper.js', () => ({
@@ -282,5 +282,39 @@ describe('clusterData', () => {
     await expect(clusterData({ data, checkCancellation })).rejects.toThrow(
       'aborted',
     )
+  })
+})
+
+describe('clusterObject', () => {
+  it('should extract labels and data from object', async () => {
+    const mockWasmResult = {
+      tree: {
+        name: 'Root',
+        height: 1.0,
+        children: [
+          { name: 'A', height: 0 },
+          { name: 'B', height: 0 },
+        ],
+      },
+      order: [0, 1],
+      heights: new Float32Array([1.0]),
+      merges: [[0, 1]] as [number, number][],
+    }
+
+    vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
+
+    await clusterObject({
+      data: {
+        A: [1, 2],
+        B: [3, 4],
+      },
+    })
+
+    expect(hierarchicalClusterWasm).toHaveBeenCalledWith({
+      data: [[1, 2], [3, 4]],
+      sampleLabels: ['A', 'B'],
+      statusCallback: undefined,
+      checkCancellation: undefined,
+    })
   })
 })

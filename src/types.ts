@@ -17,3 +17,9 @@ export interface ClusterOptions {
   onProgress?: (message: string) => void
   checkCancellation?: () => void
 }
+
+export interface ClusterObjectOptions {
+  data: Record<string, number[]>
+  onProgress?: (message: string) => void
+  checkCancellation?: () => void
+}
