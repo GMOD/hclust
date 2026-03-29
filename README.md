@@ -9,6 +9,13 @@ WebAssembly, with JavaScript/TypeScript wrappers for easy integration.
 sample starts as its own cluster; at each step the two clusters with the
 smallest mean pairwise Euclidean distance are merged, until one cluster remains.
 
+Average linkage measures inter-cluster distance as the mean of all pairwise
+distances. This is a middle ground between single linkage (minimum distance,
+prone to chaining) and complete linkage (maximum distance, forces compact
+clusters). For the genomics track use case — ordering samples by similarity for
+a heatmap — average linkage is a good default. Note that R's `hclust` defaults
+to `method="complete"`; use `method="average"` to get equivalent behavior.
+
 This is equivalent to R's `hclust(method="average")`, with two differences: R
 uses the Lance-Williams recurrence for an O(n²) merge step, whereas this
 recomputes average distances from the original matrix each iteration (O(n³)).
