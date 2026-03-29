@@ -4,13 +4,16 @@ import type { ClusterNode } from './types.js'
 
 type ClusteringModule = Awaited<ReturnType<typeof createClusteringModule>>
 
-let moduleInstance: ClusteringModule | null = null
+let modulePromise: Promise<ClusteringModule> | null = null
 
-async function getModule() {
-  if (!moduleInstance) {
-    moduleInstance = await createClusteringModule()
+function getModule() {
+  if (!modulePromise) {
+    modulePromise = createClusteringModule().catch((e: unknown) => {
+      modulePromise = null
+      throw e
+    })
   }
-  return moduleInstance
+  return modulePromise
 }
 
 export interface ClusteringResult {
@@ -33,14 +36,15 @@ export async function hierarchicalClusterWasm(
   const { data, sampleLabels, statusCallback, checkCancellation } = options
   const module = await getModule()
   const numSamples = data.length
+  if (numSamples < 2) {
+    throw new Error('clusterData requires at least 2 samples')
+  }
   const vectorSize = data[0]?.length ?? 0
 
   // Flatten data
   const flatData = new Float32Array(numSamples * vectorSize)
   for (let i = 0; i < numSamples; i++) {
-    for (let j = 0; j < vectorSize; j++) {
-      flatData[i * vectorSize + j] = data[i]![j]!
-    }
+    flatData.set(data[i]!, i * vectorSize)
   }
 
   // Allocate memory

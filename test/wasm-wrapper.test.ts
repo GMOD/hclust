@@ -53,7 +53,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should free all allocated memory', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
@@ -103,7 +103,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should propagate error thrown by checkCancellation', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
@@ -283,7 +283,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should setup progress callback when statusCallback is provided', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
     const statusCallback = vi.fn()
 
     mockModule.HEAPF32.fill(0)
@@ -296,7 +296,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should setup progress callback when checkCancellation is provided', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
     const checkCancellation = vi.fn()
 
     mockModule.HEAPF32.fill(0)
@@ -309,7 +309,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should cleanup progress callback after completion', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
     const statusCallback = vi.fn()
 
     mockModule.HEAPF32.fill(0)
@@ -322,7 +322,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should cleanup memory even if checkCancellation throws', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
@@ -351,7 +351,7 @@ describe('wasm-wrapper', () => {
   })
 
   it('should cleanup callback even if checkCancellation throws', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
@@ -412,25 +412,25 @@ describe('wasm-wrapper', () => {
     expect(result.order).toHaveLength(3)
   })
 
+  it('should throw for fewer than 2 samples', async () => {
+    await expect(hierarchicalClusterWasm({ data: [[1, 2, 3]] })).rejects.toThrow(
+      'at least 2 samples',
+    )
+  })
+
   it('should handle single sample', async () => {
-    const data = [[1, 2, 3]]
+    const data = [[1, 2, 3], [4, 5, 6]]
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
-    mockModule.HEAP32[0] = 0
 
     const result = await hierarchicalClusterWasm({ data })
 
-    expect(result.tree.name).toBe('Sample 0')
-    expect(result.tree.height).toBe(0)
-    expect(result.tree.children).toBeUndefined()
-    expect(result.heights).toHaveLength(0)
-    expect(result.merges).toHaveLength(0)
-    expect(result.order).toEqual([0])
+    expect(result.tree).toBeDefined()
   })
 
   it('should reuse module instance on subsequent calls', async () => {
-    const data = [[1, 2]]
+    const data = [[1, 2], [3, 4]]
 
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)

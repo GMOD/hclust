@@ -14,8 +14,6 @@ typedef struct {
   int* indexes;      // Array of sample indexes in this cluster
   int indexCount;    // Number of indexes
   float height;      // Distance at which cluster was formed
-  int leftChild;     // Index of left child (-1 if leaf)
-  int rightChild;    // Index of right child (-1 if leaf)
 } Cluster;
 
 // Progress callback type
@@ -78,9 +76,8 @@ static float averageDistance(
 }
 
 /**
- * Perform complete hierarchical clustering algorithm
+ * Perform agglomerative hierarchical clustering (UPGMA)
  * Returns a tree structure encoded as parallel arrays
- * Returns -1 if cancelled, 0 on success
  *
  * @param data Flattened 2D array of sample data
  * @param numSamples Number of samples
@@ -104,37 +101,26 @@ int hierarchicalCluster(
   float* distances = (float*)malloc(numSamples * numSamples * sizeof(float));
 
   clock_t lastProgressTime = clock();
-  clock_t lastCancelCheckTime = clock();
   const clock_t progressInterval = CLOCKS_PER_SEC / 10; // 100ms
-  const clock_t cancelCheckInterval = CLOCKS_PER_SEC; // 1s
-  int totalDistanceCalcs = numSamples * numSamples;
+  int totalDistanceCalcs = numSamples * (numSamples - 1);
   int distanceCalcsDone = 0;
 
   for (int i = 0; i < numSamples; i++) {
+    distances[i * numSamples + i] = 0.0f;
     const float* vecA = data + (i * vectorSize);
-    for (int j = 0; j < numSamples; j++) {
+    for (int j = i + 1; j < numSamples; j++) {
       const float* vecB = data + (j * vectorSize);
-      distances[i * numSamples + j] = euclideanDistance(vecA, vecB, vectorSize);
-      distanceCalcsDone++;
+      float d = euclideanDistance(vecA, vecB, vectorSize);
+      distances[i * numSamples + j] = d;
+      distances[j * numSamples + i] = d;
+      distanceCalcsDone += 2;
 
-      // Check for progress updates every 100ms
-      clock_t currentTime = clock();
-      if (g_progressCallback != NULL &&
-          (currentTime - lastProgressTime >= progressInterval)) {
-        // Report progress as negative to indicate distance matrix phase
-        g_progressCallback(-distanceCalcsDone, totalDistanceCalcs);
-        lastProgressTime = currentTime;
-      }
-
-      // Check for cancellation every 1s
-      if (g_progressCallback != NULL &&
-          (currentTime - lastCancelCheckTime >= cancelCheckInterval)) {
-        int shouldContinue = g_progressCallback(-distanceCalcsDone, totalDistanceCalcs);
-        if (!shouldContinue) {
-          free(distances);
-          return -1; // Cancelled
+      if (g_progressCallback != NULL) {
+        clock_t currentTime = clock();
+        if (currentTime - lastProgressTime >= progressInterval) {
+          g_progressCallback(-distanceCalcsDone, totalDistanceCalcs);
+          lastProgressTime = currentTime;
         }
-        lastCancelCheckTime = currentTime;
       }
     }
   }
@@ -148,41 +134,19 @@ int hierarchicalCluster(
     clusters[i].indexes[0] = i;
     clusters[i].indexCount = 1;
     clusters[i].height = 0.0f;
-    clusters[i].leftChild = -1;
-    clusters[i].rightChild = -1;
   }
 
   int totalIterations = numSamples - 1;
-  // Reuse timing variables from distance matrix phase
   lastProgressTime = clock();
-  lastCancelCheckTime = clock();
 
   // Hierarchical clustering loop
   for (int iteration = 0; iteration < totalIterations; iteration++) {
-    clock_t currentTime = clock();
-
-    // Check for progress updates every 100ms
-    if (g_progressCallback != NULL &&
-        (currentTime - lastProgressTime >= progressInterval)) {
-      // Call callback but don't check return value (just for progress)
-      g_progressCallback(iteration, totalIterations);
-      lastProgressTime = currentTime;
-    }
-
-    // Check for cancellation every 1s
-    if (g_progressCallback != NULL &&
-        (currentTime - lastCancelCheckTime >= cancelCheckInterval)) {
-      int shouldContinue = g_progressCallback(iteration, totalIterations);
-      if (!shouldContinue) {
-        // Cleanup on cancellation
-        for (int i = 0; i < numClusters; i++) {
-          free(clusters[i].indexes);
-        }
-        free(clusters);
-        free(distances);
-        return -1; // Cancelled
+    if (g_progressCallback != NULL) {
+      clock_t currentTime = clock();
+      if (currentTime - lastProgressTime >= progressInterval) {
+        g_progressCallback(iteration, totalIterations);
+        lastProgressTime = currentTime;
       }
-      lastCancelCheckTime = currentTime;
     }
 
     // Find closest pair of clusters
@@ -211,8 +175,6 @@ int hierarchicalCluster(
     newCluster.indexCount = clusters[minRow].indexCount + clusters[minCol].indexCount;
     newCluster.indexes = (int*)malloc(newCluster.indexCount * sizeof(int));
     newCluster.height = minDist;
-    newCluster.leftChild = minRow;
-    newCluster.rightChild = minCol;
 
     // Combine indexes
     memcpy(newCluster.indexes, clusters[minRow].indexes,

@@ -3,11 +3,24 @@
 This package provides fast hierarchical clustering algorithms compiled from C to
 WebAssembly, with JavaScript/TypeScript wrappers for easy integration.
 
+## Algorithm
+
+**Agglomerative hierarchical clustering with average linkage (UPGMA).** Each
+sample starts as its own cluster; at each step the two clusters with the
+smallest mean pairwise Euclidean distance are merged, until one cluster remains.
+
+This is equivalent to R's `hclust(method="average")`, with two differences: R
+uses the Lance-Williams recurrence for an O(n²) merge step, whereas this
+recomputes average distances from the original matrix each iteration (O(n³)).
+For the tens-to-hundreds of samples typical in genomics tracks, this is
+negligible and WASM more than compensates. R also accepts a precomputed distance
+matrix; this library computes Euclidean distances from raw vectors internally.
+
 ## Features
 
 - Fast distance matrix computation using WASM
 - Float32 precision for memory efficiency
-- Hierarchical clustering with average linkage
+- Hierarchical clustering with average linkage (UPGMA)
 - Multiple output formats including Newick, JSON, and tree visualization
 - Cancellation support via a callback
 - Utilities for parsing and serializing to Newick format
@@ -35,10 +48,9 @@ const tree = fromNewick(newick)
 
 ## Cancellation
 
-`clusterData` accepts an optional `checkCancellation` callback. It is called
-periodically during the WASM clustering computation. To cancel, throw an error
-from the callback — the error propagates out of `clusterData` and memory is
-cleaned up via a `finally` block.
+`clusterData` accepts an optional `checkCancellation: () => void` callback,
+called periodically during the WASM computation. Throw from it to cancel —
+the error propagates out of `clusterData`.
 
 ```typescript
 clusterData({
@@ -51,22 +63,17 @@ clusterData({
 })
 ```
 
-This library is designed to run in a **web worker**. The clustering computation
-runs entirely in WASM without yielding to the JS event loop — yielding between
-iterations (e.g. via `setTimeout` or `await`) would add overhead that
-significantly slows large datasets. Running in a worker keeps the main thread
-responsive while clustering proceeds at full speed.
+This library is designed to run in a **web worker**. The WASM computation
+deliberately never yields to the JS event loop — yielding would add overhead
+that significantly slows large datasets, and running in a worker keeps the main
+thread responsive. The consequence is that no other JS on the worker thread runs
+while clustering is in progress, so a flag set from the same worker won't be
+visible until after it completes. Two approaches work around this:
 
-The consequence is that no other JS on the worker thread can run while
-clustering is in progress, so a simple flag set from within the same worker
-won't be seen until after the computation finishes. The two approaches below
-work around this by reading cancellation state through mechanisms that don't
-require yielding:
+### SharedArrayBuffer (requires cross-origin isolation)
 
-### SharedArrayBuffer (works anywhere, requires cross-origin isolation)
-
-A `SharedArrayBuffer` can be written from one thread and read from another using
-`Atomics`, so the check is a fast memory read with no I/O:
+A `SharedArrayBuffer` can be written by one thread and read by another via
+`Atomics` — a fast memory read with no I/O:
 
 ```typescript
 // Create a shared flag (requires COOP/COEP headers on the page)
@@ -85,27 +92,23 @@ clusterData({
 })
 ```
 
-Cross-origin isolation is required for `SharedArrayBuffer`. Set these HTTP
-response headers on your page:
+Cross-origin isolation requires these HTTP response headers:
 
 ```
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-### Synchronous XHR via a blob URL (web workers only)
+### Blob URL + synchronous XHR (web workers only)
 
-If the page is not cross-origin isolated, you can use a blob URL as a
-cancellation token. Revoking the URL causes a synchronous XHR to that URL to
-fail, which signals cancellation. This relies on synchronous XHR, which is only
-permitted in web workers (not on the main thread).
+Without cross-origin isolation, use a blob URL as a cancellation token.
+Revoking the URL causes a synchronous XHR to it to throw, signalling
+cancellation. Synchronous XHR is only permitted in web workers.
 
 ```typescript
-// Create a blob URL token
 const token = URL.createObjectURL(new Blob())
 
-// To cancel from anywhere:
-// URL.revokeObjectURL(token)
+// To cancel: URL.revokeObjectURL(token)
 
 clusterData({
   data,
@@ -120,9 +123,6 @@ clusterData({
   },
 })
 ```
-
-Synchronous XHR is blocked on the main thread to prevent freezing the UI, so
-this approach only works inside a web worker.
 
 ### Summary
 

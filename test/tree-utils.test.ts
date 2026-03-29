@@ -204,7 +204,7 @@ describe('tree-utils', () => {
       expect(tree.children?.[0]?.height).toBe(0.5)
     })
 
-    it('should round-trip with toNewick', () => {
+    it('should round-trip with toNewick preserving heights', () => {
       const original: ClusterNode = {
         name: '',
         height: 2.0,
@@ -223,9 +223,18 @@ describe('tree-utils', () => {
 
       const newick = toNewick(original)
       const parsed = fromNewick(newick)
+      expect(parsed.height).toBeCloseTo(2.0)
+      expect(parsed.children?.[0]?.height).toBeCloseTo(1.0)
       expect(parsed.children?.[0]?.children?.[0]?.name).toBe('A')
       expect(parsed.children?.[0]?.children?.[1]?.name).toBe('B')
       expect(parsed.children?.[1]?.name).toBe('C')
+    })
+
+    it('should parse numeric height after closing paren', () => {
+      const tree = fromNewick('(A,B)1.5000')
+      expect(tree.height).toBeCloseTo(1.5)
+      expect(tree.children?.[0]?.name).toBe('A')
+      expect(tree.children?.[1]?.name).toBe('B')
     })
 
     it('should handle complex Wikipedia example', () => {

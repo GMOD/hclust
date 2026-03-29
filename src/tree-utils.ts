@@ -53,13 +53,14 @@ export function fromNewick(s: string): ClusterNode {
         break
       default: {
         const x = tokens[i - 1]
-        if (
-          x === ')' ||
-          x === '(' ||
-          x === ',' ||
-          x === undefined ||
-          x === ''
-        ) {
+        if (x === ')') {
+          const num = Number.parseFloat(token)
+          if (!Number.isNaN(num)) {
+            tree.height = num
+          } else {
+            tree.name = token
+          }
+        } else if (x === '(' || x === ',' || x === undefined || x === '') {
           tree.name = token
         } else if (x === ':') {
           tree.height = Number.parseFloat(token)
