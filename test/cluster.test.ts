@@ -311,7 +311,10 @@ describe('clusterObject', () => {
     })
 
     expect(hierarchicalClusterWasm).toHaveBeenCalledWith({
-      data: [[1, 2], [3, 4]],
+      data: [
+        [1, 2],
+        [3, 4],
+      ],
       sampleLabels: ['A', 'B'],
       statusCallback: undefined,
       checkCancellation: undefined,
