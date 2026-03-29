@@ -4,7 +4,7 @@ set -e
 echo "Building WASM module for clustering..."
 
 # Source emscripten environment
-source ~/emsdk/emsdk_env.sh
+source "${EMSDK:-$HOME/emsdk}/emsdk_env.sh"
 
 # Navigate to the wasm directory
 cd "$(dirname "$0")/../src/wasm"
