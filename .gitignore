@@ -3,6 +3,5 @@ node_modules/
 dist
 esm
 .eslintcache
-src/distance.js
 src/distance.d.ts
 src/wasm/distance.js
