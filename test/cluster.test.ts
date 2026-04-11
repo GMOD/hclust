@@ -41,8 +41,6 @@ describe('clusterData', () => {
 
     expect(result.tree).toEqual(mockWasmResult.tree)
     expect(result.order).toEqual([0, 1])
-    expect(result.distances).toBeInstanceOf(Float32Array)
-    expect(result.distances.length).toBe(4)
   })
 
   it('should pass sampleLabels to wasm wrapper', async () => {
@@ -174,7 +172,7 @@ describe('clusterData', () => {
       heights: new Float32Array([1.0, 2.0]),
       merges: [
         [0, 1],
-        [0, 1],
+        [0, 2],
       ] as [number, number][],
     }
 
@@ -219,27 +217,6 @@ describe('clusterData', () => {
     expect(result.clustersGivenK[1]).toEqual([])
   })
 
-  it('should return distances as Float32Array', async () => {
-    const mockWasmResult = {
-      tree: { name: 'Root', height: 1.0 },
-      order: [0, 1],
-      heights: new Float32Array([1.0]),
-      merges: [[0, 1]] as [number, number][],
-    }
-
-    vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
-
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    const result = await clusterData({ data })
-
-    expect(result.distances).toBeInstanceOf(Float32Array)
-    expect(result.distances.length).toBe(data.length * data.length)
-  })
-
   it('should handle complex merge sequences', async () => {
     const mockWasmResult = {
       tree: {
@@ -250,8 +227,8 @@ describe('clusterData', () => {
       heights: new Float32Array([1.0, 2.0, 3.0]),
       merges: [
         [0, 1],
-        [0, 1],
-        [0, 1],
+        [0, 2],
+        [0, 3],
       ] as [number, number][],
     }
 

@@ -421,9 +421,9 @@ describe('wasm-wrapper', () => {
     mockModule.HEAPF32[heightsOffset] = 0.5
     mockModule.HEAPF32[heightsOffset + 1] = 2.0
     mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeAOffset + 1] = 1
+    mockModule.HEAP32[mergeAOffset + 1] = 0
     mockModule.HEAP32[mergeBOffset] = 1
-    mockModule.HEAP32[mergeBOffset + 1] = 0
+    mockModule.HEAP32[mergeBOffset + 1] = 2
 
     const result = await hierarchicalClusterWasm({ data })
 

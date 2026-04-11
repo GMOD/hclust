@@ -41,31 +41,26 @@ export async function hierarchicalClusterWasm(
   }
   const vectorSize = data[0]?.length ?? 0
 
-  // Flatten data
   const flatData = new Float32Array(numSamples * vectorSize)
   for (let i = 0; i < numSamples; i++) {
     flatData.set(data[i]!, i * vectorSize)
   }
 
-  // Allocate memory
-  const dataPtr = module._malloc(flatData.length * 4)
+  const dataPtr    = module._malloc(flatData.length * 4)
   const heightsPtr = module._malloc((numSamples - 1) * 4)
-  const mergeAPtr = module._malloc((numSamples - 1) * 4)
-  const mergeBPtr = module._malloc((numSamples - 1) * 4)
-  const orderPtr = module._malloc(numSamples * 4)
+  const mergeAPtr  = module._malloc((numSamples - 1) * 4)
+  const mergeBPtr  = module._malloc((numSamples - 1) * 4)
+  const orderPtr   = module._malloc(numSamples * 4)
 
   let callbackPtr: number | null = null
 
   try {
-    // Copy data to WASM
     module.HEAPF32.set(flatData, dataPtr / 4)
 
-    // Set up progress callback if provided
     if (statusCallback || checkCancellation) {
       const progressCallback = (iteration: number, totalIterations: number) => {
         checkCancellation?.()
         if (statusCallback) {
-          // Negative iteration indicates distance matrix phase
           if (iteration < 0) {
             const distancesDone = -iteration
             const progress = Math.round((distancesDone / totalIterations) * 100)
@@ -75,15 +70,14 @@ export async function hierarchicalClusterWasm(
             statusCallback(`Clustering samples: ${progress}%`)
           }
         }
-        return 1 // Continue
+        return 1
       }
 
       callbackPtr = module.addFunction(progressCallback, 'iii')
       module._setProgressCallback(callbackPtr)
     }
 
-    // Run clustering in WASM
-    module._hierarchicalCluster(
+    const result = module._hierarchicalCluster(
       dataPtr,
       numSamples,
       vectorSize,
@@ -93,7 +87,10 @@ export async function hierarchicalClusterWasm(
       orderPtr,
     )
 
-    // Copy results back
+    if (result === -1) {
+      throw new Error('aborted')
+    }
+
     const heights = new Float32Array(numSamples - 1)
     heights.set(
       module.HEAPF32.subarray(heightsPtr / 4, heightsPtr / 4 + numSamples - 1),
@@ -112,7 +109,6 @@ export async function hierarchicalClusterWasm(
     const order = new Int32Array(numSamples)
     order.set(module.HEAP32.subarray(orderPtr / 4, orderPtr / 4 + numSamples))
 
-    // Rebuild tree structure from merge information
     const tree = rebuildTree(numSamples, heights, mergeA, mergeB, sampleLabels)
     const merges: [number, number][] = []
     for (let i = 0; i < numSamples - 1; i++) {
@@ -126,7 +122,6 @@ export async function hierarchicalClusterWasm(
       merges,
     }
   } finally {
-    // Clean up callback
     if (callbackPtr !== null) {
       module.removeFunction(callbackPtr)
       module._setProgressCallback(0)
@@ -140,6 +135,8 @@ export async function hierarchicalClusterWasm(
   }
 }
 
+// Rebuilds the tree from stable slot indices (mergeA[i] < mergeB[i] always).
+// Slot mergeA[i] absorbs mergeB[i] each iteration, so nodes[0] is always the root.
 function rebuildTree(
   numSamples: number,
   heights: Float32Array,
@@ -147,38 +144,17 @@ function rebuildTree(
   mergeB: Int32Array,
   sampleLabels?: string[],
 ): ClusterNode {
-  // Create leaf nodes
   const nodes: ClusterNode[] = []
   for (let i = 0; i < numSamples; i++) {
-    nodes.push({
-      name: sampleLabels?.[i] ?? `Sample ${i}`,
-      height: 0,
-    })
+    nodes.push({ name: sampleLabels?.[i] ?? `Sample ${i}`, height: 0 })
   }
-
-  // Build tree from merge information
   for (let i = 0; i < numSamples - 1; i++) {
-    const leftIdx = mergeA[i]!
-    const rightIdx = mergeB[i]!
-
-    const leftNode = nodes[leftIdx]!
-    const rightNode = nodes[rightIdx]!
-
-    const newNode: ClusterNode = {
+    const a = mergeA[i]!, b = mergeB[i]!
+    nodes[a] = {
       name: `Cluster ${i}`,
       height: heights[i]!,
-      children: [leftNode, rightNode],
+      children: [nodes[a]!, nodes[b]!],
     }
-
-    // Replace the merged clusters with the new one
-    // Remove higher index first
-    const removeFirst = Math.max(leftIdx, rightIdx)
-    const removeSecond = Math.min(leftIdx, rightIdx)
-
-    nodes.splice(removeFirst, 1)
-    nodes.splice(removeSecond, 1)
-    nodes.push(newNode)
   }
-
   return nodes[0]!
 }

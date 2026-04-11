@@ -21,40 +21,27 @@ export async function clusterData({
     checkCancellation,
   })
 
-  // Build clustersGivenK from merge information
+  // Build clustersGivenK from stable-slot merge sequence.
+  // mergeA[i] and mergeB[i] are stable slot indices; slot mergeA[i] absorbs mergeB[i].
   const numSamples = data.length
   const clustersGivenK: number[][][] = [[]]
 
-  // Start with each sample in its own cluster
-  const clusterSets: number[][] = Array.from({ length: numSamples }, (_, i) => [
-    i,
-  ])
+  const membership = Array.from({ length: numSamples }, (_, i) => [i] as number[])
+  const activeSlots = new Set(Array.from({ length: numSamples }, (_, i) => i))
 
   for (let i = 0; i < numSamples - 1; i++) {
-    const [mergeA, mergeB] = result.merges[i]!
+    const [a, b] = result.merges[i]!
 
-    // Record current state
-    clustersGivenK.push(clusterSets.map(s => [...s]))
+    clustersGivenK.push([...activeSlots].map(id => [...membership[id]!]))
 
-    // Merge clusters
-    const newCluster = [...clusterSets[mergeA]!, ...clusterSets[mergeB]!]
-
-    const removeFirst = Math.max(mergeA, mergeB)
-    const removeSecond = Math.min(mergeA, mergeB)
-
-    clusterSets.splice(removeFirst, 1)
-    clusterSets.splice(removeSecond, 1)
-    clusterSets.push(newCluster)
+    membership[a] = [...membership[a]!, ...membership[b]!]
+    activeSlots.delete(b!)
   }
 
-  clustersGivenK.push(clusterSets.map(s => [...s]))
-
-  // Create a dummy distance matrix (not used by caller, but part of interface)
-  const distances = new Float32Array(numSamples * numSamples)
+  clustersGivenK.push([...activeSlots].map(id => [...membership[id]!]))
 
   return {
     tree: result.tree,
-    distances,
     order: result.order,
     clustersGivenK: clustersGivenK.reverse(),
   }

@@ -6,7 +6,6 @@ export interface ClusterNode {
 
 export interface ClusterResult {
   tree: ClusterNode
-  distances: Float32Array
   order: number[]
   clustersGivenK: number[][][]
 }
