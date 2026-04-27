@@ -46,11 +46,11 @@ export async function hierarchicalClusterWasm(
     flatData.set(data[i]!, i * vectorSize)
   }
 
-  const dataPtr    = module._malloc(flatData.length * 4)
+  const dataPtr = module._malloc(flatData.length * 4)
   const heightsPtr = module._malloc((numSamples - 1) * 4)
-  const mergeAPtr  = module._malloc((numSamples - 1) * 4)
-  const mergeBPtr  = module._malloc((numSamples - 1) * 4)
-  const orderPtr   = module._malloc(numSamples * 4)
+  const mergeAPtr = module._malloc((numSamples - 1) * 4)
+  const mergeBPtr = module._malloc((numSamples - 1) * 4)
+  const orderPtr = module._malloc(numSamples * 4)
 
   let callbackPtr: number | null = null
 
@@ -149,7 +149,8 @@ function rebuildTree(
     nodes.push({ name: sampleLabels?.[i] ?? `Sample ${i}`, height: 0 })
   }
   for (let i = 0; i < numSamples - 1; i++) {
-    const a = mergeA[i]!, b = mergeB[i]!
+    const a = mergeA[i]!,
+      b = mergeB[i]!
     nodes[a] = {
       name: `Cluster ${i}`,
       height: heights[i]!,

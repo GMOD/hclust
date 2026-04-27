@@ -26,7 +26,10 @@ export async function clusterData({
   const numSamples = data.length
   const clustersGivenK: number[][][] = [[]]
 
-  const membership = Array.from({ length: numSamples }, (_, i) => [i] as number[])
+  const membership = Array.from(
+    { length: numSamples },
+    (_, i) => [i] as number[],
+  )
   const activeSlots = new Set(Array.from({ length: numSamples }, (_, i) => i))
 
   for (let i = 0; i < numSamples - 1; i++) {

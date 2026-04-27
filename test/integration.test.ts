@@ -34,7 +34,9 @@ describe('clusterData integration', () => {
     expect(result.tree.height).toBeCloseTo(4.5)
     expect(result.tree.children).toHaveLength(2)
 
-    const childHeights = result.tree.children!.map(c => c.height).sort((a, b) => a - b)
+    const childHeights = result.tree
+      .children!.map(c => c.height)
+      .sort((a, b) => a - b)
     expect(childHeights[0]).toBeCloseTo(1.0) // d(sample0, sample1)
     expect(childHeights[1]).toBeCloseTo(2.0) // d(sample2, sample3)
 
@@ -43,8 +45,16 @@ describe('clusterData integration', () => {
     expect(result.clustersGivenK).toHaveLength(5)
     expect(result.clustersGivenK[4]).toEqual([])
     expect(sortedClusters(result.clustersGivenK[0]!)).toEqual([[0, 1, 2, 3]])
-    expect(sortedClusters(result.clustersGivenK[1]!)).toEqual([[0, 1], [2, 3]])
-    expect(sortedClusters(result.clustersGivenK[3]!)).toEqual([[0], [1], [2], [3]])
+    expect(sortedClusters(result.clustersGivenK[1]!)).toEqual([
+      [0, 1],
+      [2, 3],
+    ])
+    expect(sortedClusters(result.clustersGivenK[3]!)).toEqual([
+      [0],
+      [1],
+      [2],
+      [3],
+    ])
   })
 
   it('clusters 4 samples in 2D correctly', async () => {
@@ -58,7 +68,10 @@ describe('clusterData integration', () => {
     const result = await clusterData({ data })
 
     expect(result.tree.height).toBeGreaterThan(5)
-    expect(sortedClusters(result.clustersGivenK[1]!)).toEqual([[0, 1], [2, 3]])
+    expect(sortedClusters(result.clustersGivenK[1]!)).toEqual([
+      [0, 1],
+      [2, 3],
+    ])
   })
 
   it('rejects fewer than 2 samples', async () => {
