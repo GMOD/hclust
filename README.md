@@ -1,36 +1,21 @@
 # @gmod/hclust
 
-This package provides fast hierarchical clustering algorithms compiled from C to
-WebAssembly, with JavaScript/TypeScript wrappers for easy integration.
+Fast hierarchical clustering (UPGMA) compiled to WebAssembly with
+JavaScript/TypeScript bindings.
 
 ## Algorithm
 
-**Agglomerative hierarchical clustering with average linkage (UPGMA).** Each
-sample starts as its own cluster; at each step the two clusters with the
-smallest mean pairwise Euclidean distance are merged, until one cluster remains.
-
-Average linkage measures inter-cluster distance as the mean of all pairwise
-distances. This is a middle ground between single linkage (minimum distance,
-prone to chaining) and complete linkage (maximum distance, forces compact
-clusters). For the genomics track use case — ordering samples by similarity for
-a heatmap — average linkage is a good default. Note that R's `hclust` defaults
-to `method="complete"`; use `method="average"` to get equivalent behavior.
-
-This is equivalent to R's `hclust(method="average")`, with two differences: R
-uses the Lance-Williams recurrence for an O(n²) merge step, whereas this
-recomputes average distances from the original matrix each iteration (O(n³)).
-For the tens-to-hundreds of samples typical in genomics tracks, this is
-negligible and WASM more than compensates. R also accepts a precomputed distance
-matrix; this library computes Euclidean distances from raw vectors internally.
+Agglomerative clustering with average linkage. Computes Euclidean distances,
+then merges the closest clusters at each step until one cluster remains,
+producing a dendrogram. Equivalent to R's `hclust(method="average")`.
 
 ## Features
 
-- Fast distance matrix computation using WASM
-- Float32 precision for memory efficiency
-- Hierarchical clustering with average linkage (UPGMA)
-- Multiple output formats including Newick, JSON, and tree visualization
-- Cancellation support via a callback
-- Utilities for parsing and serializing to Newick format
+- WASM-accelerated distance matrix and clustering
+- Float32 precision
+- Newick/JSON serialization
+- Cancellation via callback
+- Web worker compatible
 
 ## Usage
 
@@ -66,88 +51,26 @@ const result = await clusterData({
 
 ## Cancellation
 
-`clusterData` accepts an optional `checkCancellation: () => void` callback,
-called periodically during the WASM computation. Throw from it to cancel — the
-error propagates out of `clusterData`.
+Pass `checkCancellation: () => void` to throw and cancel:
 
 ```typescript
 clusterData({
   data,
   checkCancellation: () => {
-    if (shouldCancel) {
-      throw new Error('cancelled')
-    }
+    if (shouldCancel) throw new Error('cancelled')
   },
 })
 ```
 
-This library is designed to run in a **web worker**. The WASM computation
-deliberately never yields to the JS event loop — yielding would add overhead
-that significantly slows large datasets, and running in a worker keeps the main
-thread responsive. The consequence is that no other JS on the worker thread runs
-while clustering is in progress, so a flag set from the same worker won't be
-visible until after it completes. Two approaches work around this:
+For web workers with cross-origin isolation, use `SharedArrayBuffer` +
+`Atomics`. Without it, use blob URL + synchronous XHR (web workers only).
 
-### SharedArrayBuffer (requires cross-origin isolation)
+## References
 
-A `SharedArrayBuffer` can be written by one thread and read by another via
-`Atomics` — a fast memory read with no I/O:
-
-```typescript
-// Create a shared flag (requires COOP/COEP headers on the page)
-const flag = new Int32Array(new SharedArrayBuffer(4))
-
-// From another thread (e.g. the main thread messaging this worker):
-// Atomics.store(flag, 0, 1)  // signal cancellation
-
-clusterData({
-  data,
-  checkCancellation: () => {
-    if (Atomics.load(flag, 0) === 1) {
-      throw new Error('cancelled')
-    }
-  },
-})
-```
-
-Cross-origin isolation requires these HTTP response headers:
-
-```
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-```
-
-### Blob URL + synchronous XHR (web workers only)
-
-Without cross-origin isolation, use a blob URL as a cancellation token. Revoking
-the URL causes a synchronous XHR to it to throw, signalling cancellation.
-Synchronous XHR is only permitted in web workers.
-
-```typescript
-const token = URL.createObjectURL(new Blob())
-
-// To cancel: URL.revokeObjectURL(token)
-
-clusterData({
-  data,
-  checkCancellation: () => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('GET', token, false) // synchronous
-    try {
-      xhr.send(null)
-    } catch {
-      throw new Error('cancelled')
-    }
-  },
-})
-```
-
-### Summary
-
-| Approach                    | Works on main thread | Works in web worker | Requires cross-origin isolation |
-| --------------------------- | -------------------- | ------------------- | ------------------------------- |
-| SharedArrayBuffer + Atomics | yes                  | yes                 | yes                             |
-| Blob URL + sync XHR         | no                   | yes                 | no                              |
+- **UPGMA**: Sokal, R.R. & Michener, C.D. (1958).
+- **Lance-Williams recurrence**: Lance, G.N. & Williams, W.T. (1967).
+- **Newick format**: Olsen, G.J. (1990).
+  http://evolution.genetics.washington.edu/phylip/newicktree.html
 
 ## Note
 

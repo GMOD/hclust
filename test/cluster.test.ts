@@ -145,10 +145,9 @@ describe('clusterData', () => {
 
     const result = await clusterData({ data })
 
-    expect(result.clustersGivenK).toHaveLength(3)
+    expect(result.clustersGivenK).toHaveLength(2)
     expect(result.clustersGivenK[0]).toEqual([[0, 1]])
     expect(result.clustersGivenK[1]).toEqual([[0], [1]])
-    expect(result.clustersGivenK[2]).toEqual([])
   })
 
   it('should build clustersGivenK correctly for 3 samples', async () => {
@@ -186,14 +185,13 @@ describe('clusterData', () => {
 
     const result = await clusterData({ data })
 
-    expect(result.clustersGivenK).toHaveLength(4)
+    expect(result.clustersGivenK).toHaveLength(3)
     expect(result.clustersGivenK[0]?.length).toBe(1)
     expect(result.clustersGivenK[0]?.[0]).toContain(0)
     expect(result.clustersGivenK[0]?.[0]).toContain(1)
     expect(result.clustersGivenK[0]?.[0]).toContain(2)
     expect(result.clustersGivenK[1]).toHaveLength(2)
     expect(result.clustersGivenK[2]).toHaveLength(3)
-    expect(result.clustersGivenK[3]).toEqual([])
   })
 
   it('should handle single sample case', async () => {
@@ -212,9 +210,8 @@ describe('clusterData', () => {
 
     expect(result.tree).toEqual({ name: 'Sample 0', height: 0 })
     expect(result.order).toEqual([0])
-    expect(result.clustersGivenK).toHaveLength(2)
+    expect(result.clustersGivenK).toHaveLength(1)
     expect(result.clustersGivenK[0]).toEqual([[0]])
-    expect(result.clustersGivenK[1]).toEqual([])
   })
 
   it('should handle complex merge sequences', async () => {
@@ -243,9 +240,11 @@ describe('clusterData', () => {
 
     const result = await clusterData({ data })
 
-    expect(result.clustersGivenK.length).toBe(5)
+    expect(result.clustersGivenK.length).toBe(4)
     expect(result.clustersGivenK[0]?.length).toBe(1)
-    expect(result.clustersGivenK[result.clustersGivenK.length - 1]).toEqual([])
+    expect(
+      result.clustersGivenK[result.clustersGivenK.length - 1],
+    ).toHaveLength(4)
   })
 
   it('should propagate error thrown by checkCancellation', async () => {

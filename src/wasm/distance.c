@@ -2,6 +2,14 @@
  * High-performance hierarchical clustering (UPGMA / average-linkage)
  * Compiled to WebAssembly using Emscripten
  *
+ * Algorithm: UPGMA (Unweighted Pair Group Method with Arithmetic Mean)
+ *   Sokal & Michener (1958). "A statistical method for evaluating systematic
+ *   relationships." University of Kansas Science Bulletin, 38, 1409-1438.
+ *
+ * Distance update: Lance-Williams recurrence for average linkage
+ *   Lance & Williams (1967). "A general theory of classificatory sorting
+ *   strategies." Computer Journal, 9(4), 373-380.
+ *
  * Key design:
  *  - Stable slot IDs: slot mergeA[i] absorbs mergeB[i]; mergeA[i] < mergeB[i] always.
  *    Slot 0 is always the final root.

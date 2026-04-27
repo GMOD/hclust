@@ -23,25 +23,38 @@ export async function clusterData({
 
   // Build clustersGivenK from stable-slot merge sequence.
   // mergeA[i] and mergeB[i] are stable slot indices; slot mergeA[i] absorbs mergeB[i].
+  // clustersGivenK[k] = cluster partitions when there are k+1 clusters (k=0..N-1).
   const numSamples = data.length
-  const clustersGivenK: number[][][] = [[]]
+  const clustersGivenK: number[][][] = []
 
-  const membership = Array.from(
-    { length: numSamples },
-    (_, i) => [i] as number[],
-  )
-  const activeSlots = new Set(Array.from({ length: numSamples }, (_, i) => i))
+  const membership: number[][] = Array.from({ length: numSamples }, (_, i) => [
+    i,
+  ])
+  const activeSlots = new Set<number>()
+  for (let i = 0; i < numSamples; i++) {
+    activeSlots.add(i)
+  }
 
   for (let i = 0; i < numSamples - 1; i++) {
     const [a, b] = result.merges[i]!
 
-    clustersGivenK.push([...activeSlots].map(id => [...membership[id]!]))
+    const snapshot: number[][] = []
+    for (const id of activeSlots) {
+      snapshot.push([...membership[id]!])
+    }
+    clustersGivenK.push(snapshot)
 
-    membership[a] = [...membership[a]!, ...membership[b]!]
+    for (const m of membership[b]!) {
+      membership[a]!.push(m)
+    }
     activeSlots.delete(b)
   }
 
-  clustersGivenK.push([...activeSlots].map(id => [...membership[id]!]))
+  const finalSnapshot: number[][] = []
+  for (const id of activeSlots) {
+    finalSnapshot.push([...membership[id]!])
+  }
+  clustersGivenK.push(finalSnapshot)
 
   return {
     tree: result.tree,

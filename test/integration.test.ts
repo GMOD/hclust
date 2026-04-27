@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { clusterData } from '../src/cluster.js'
+import { clusterData, clusterObject } from '../src/cluster.js'
 
 function sortedClusters(clusters: number[][]) {
   return clusters
@@ -18,10 +18,9 @@ describe('clusterData integration', () => {
 
     expect(result.order).toEqual([0, 1])
 
-    expect(result.clustersGivenK).toHaveLength(3)
+    expect(result.clustersGivenK).toHaveLength(2)
     expect(sortedClusters(result.clustersGivenK[0]!)).toEqual([[0, 1]])
     expect(sortedClusters(result.clustersGivenK[1]!)).toEqual([[0], [1]])
-    expect(result.clustersGivenK[2]).toEqual([])
   })
 
   it('clusters 4 samples into correct groups', async () => {
@@ -42,8 +41,7 @@ describe('clusterData integration', () => {
 
     expect(result.order).toEqual([0, 1, 2, 3])
 
-    expect(result.clustersGivenK).toHaveLength(5)
-    expect(result.clustersGivenK[4]).toEqual([])
+    expect(result.clustersGivenK).toHaveLength(4)
     expect(sortedClusters(result.clustersGivenK[0]!)).toEqual([[0, 1, 2, 3]])
     expect(sortedClusters(result.clustersGivenK[1]!)).toEqual([
       [0, 1],
@@ -78,6 +76,68 @@ describe('clusterData integration', () => {
     await expect(clusterData({ data: [[1, 2, 3]] })).rejects.toThrow(
       'at least 2 samples',
     )
+  })
+
+  it('includes K=3 partition in clustersGivenK for 4 samples', async () => {
+    // After first merge {0,1}, before second merge {2,3}, K=3 = {0,1}, {2}, {3}
+    const data = [[1], [2], [5], [7]]
+    const result = await clusterData({ data })
+
+    expect(sortedClusters(result.clustersGivenK[2]!)).toEqual([
+      [0, 1],
+      [2],
+      [3],
+    ])
+  })
+
+  it('order is a valid permutation of sample indices', async () => {
+    const data = [
+      [1, 2],
+      [3, 4],
+      [5, 1],
+      [2, 8],
+    ]
+    const result = await clusterData({ data })
+
+    expect([...result.order].sort((a, b) => a - b)).toEqual([0, 1, 2, 3])
+  })
+
+  it('fires progress callbacks during real clustering', async () => {
+    const data = Array.from({ length: 10 }, (_, i) => [i])
+    const messages: string[] = []
+
+    await clusterData({ data, onProgress: msg => messages.push(msg) })
+
+    expect(messages.length).toBeGreaterThan(0)
+    expect(messages[0]).toBe('Running hierarchical clustering in WASM...')
+  })
+
+  it('handles equal distances deterministically', async () => {
+    // Sample 1 and 2 are both distance 1 from sample 0 — ties should resolve consistently
+    const data = [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ]
+    const result1 = await clusterData({ data })
+    const result2 = await clusterData({ data })
+
+    expect(result1.order).toEqual(result2.order)
+    expect(result1.clustersGivenK).toEqual(result2.clustersGivenK)
+  })
+
+  it('clusterObject propagates labels to leaf nodes', async () => {
+    const result = await clusterObject({
+      data: { alpha: [1, 2], beta: [1, 3], gamma: [9, 9] },
+    })
+
+    const leafNames = (node: {
+      name: string
+      children?: (typeof node)[]
+    }): string[] =>
+      node.children ? node.children.flatMap(leafNames) : [node.name]
+
+    expect(leafNames(result.tree).sort()).toEqual(['alpha', 'beta', 'gamma'])
   })
 
   it('returns deterministic results for the same input', async () => {

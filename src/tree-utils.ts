@@ -19,6 +19,9 @@ export function printTree(
   return output
 }
 
+// Newick format: Olsen (1990) http://evolution.genetics.washington.edu/phylip/newicktree.html
+// Note: this library encodes internal node height as the label (e.g. "(A,B)1.2345"),
+// not as a branch length (":"). fromNewick handles both forms on input.
 export function toNewick(node: ClusterNode): string {
   if (!node.children || node.children.length === 0) {
     return node.name
@@ -28,14 +31,17 @@ export function toNewick(node: ClusterNode): string {
   return `(${childStrings.join(',')})${node.height.toFixed(4)}`
 }
 
+function newNode(): ClusterNode {
+  return { name: '', height: 0 }
+}
+
 export function fromNewick(s: string): ClusterNode {
   const ancestors: ClusterNode[] = []
-
-  let tree = {} as ClusterNode
+  let tree = newNode()
   const tokens = s.split(/\s*(;|\(|\)|,|:)\s*/)
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!
-    const subtree = {} as ClusterNode
+    const subtree = newNode()
     switch (token) {
       case '(':
         tree.children = [subtree]
@@ -49,6 +55,7 @@ export function fromNewick(s: string): ClusterNode {
       case ')':
         tree = ancestors.pop()!
         break
+      case ';':
       case ':':
         break
       default: {
@@ -69,38 +76,16 @@ export function fromNewick(s: string): ClusterNode {
     }
   }
 
-  function fillDefaults(node: ClusterNode) {
-    if (!node.name) {
-      node.name = ''
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (node.height === undefined) {
-      node.height = 0
-    }
-    if (node.children) {
-      for (const child of node.children) {
-        fillDefaults(child)
-      }
-    }
-  }
-
-  fillDefaults(tree)
   return tree
 }
 
-export function treeToJSON(node: ClusterNode) {
-  const result: {
-    name: string
-    height: number
-    children?: ReturnType<typeof treeToJSON>[]
-  } = {
+export function treeToJSON(node: ClusterNode): ClusterNode {
+  if (!node.children?.length) {
+    return { name: node.name, height: node.height }
+  }
+  return {
     name: node.name,
     height: node.height,
+    children: node.children.map(treeToJSON),
   }
-
-  if (node.children && node.children.length > 0) {
-    result.children = node.children.map(child => treeToJSON(child))
-  }
-
-  return result
 }
