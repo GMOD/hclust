@@ -35,7 +35,7 @@ export async function clusterData({
     clustersGivenK.push([...activeSlots].map(id => [...membership[id]!]))
 
     membership[a] = [...membership[a]!, ...membership[b]!]
-    activeSlots.delete(b!)
+    activeSlots.delete(b)
   }
 
   clustersGivenK.push([...activeSlots].map(id => [...membership[id]!]))
