@@ -34,25 +34,33 @@ void setProgressCallback(ProgressCallback callback) {
   g_progressCallback = callback;
 }
 
+// Squared sum is accumulated in double to avoid catastrophic cancellation on
+// long vectors — float32 only holds ~7 decimal digits, so a 10k-dimensional
+// sum loses meaningful precision. Four parallel partials give the optimizer
+// room to vectorize without breaking strict-FP associativity.
 static float euclideanDistance(
   const float* __restrict__ a,
   const float* __restrict__ b,
   int size
 ) {
-  float sum = 0.0f;
+  double s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0;
   int i = 0;
   for (; i + 3 < size; i += 4) {
-    float d0 = a[i]   - b[i];
-    float d1 = a[i+1] - b[i+1];
-    float d2 = a[i+2] - b[i+2];
-    float d3 = a[i+3] - b[i+3];
-    sum += d0*d0 + d1*d1 + d2*d2 + d3*d3;
+    double d0 = (double)a[i]   - (double)b[i];
+    double d1 = (double)a[i+1] - (double)b[i+1];
+    double d2 = (double)a[i+2] - (double)b[i+2];
+    double d3 = (double)a[i+3] - (double)b[i+3];
+    s0 += d0 * d0;
+    s1 += d1 * d1;
+    s2 += d2 * d2;
+    s3 += d3 * d3;
   }
+  double sum = (s0 + s1) + (s2 + s3);
   for (; i < size; i++) {
-    float d = a[i] - b[i];
+    double d = (double)a[i] - (double)b[i];
     sum += d * d;
   }
-  return sqrtf(sum);
+  return (float)sqrt(sum);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -69,6 +77,17 @@ int hierarchicalCluster(
   int*   sizes      = NULL;
   int*   activeList = NULL;
   int*   activePos  = NULL;
+  float* lastHeight = NULL;
+
+  // --- Validate input: a single NaN/Inf would silently poison every distance
+  // (NaN compares false everywhere, so find-min would skip it and produce a
+  // wrong tree without an error). Cheap one-pass guard at entry.
+  {
+    size_t total = (size_t)numSamples * (size_t)vectorSize;
+    for (size_t i = 0; i < total; i++) {
+      if (!isfinite(data[i])) return -2;
+    }
+  }
 
   // --- Distance matrix (full n×n, upper triangle computed, mirrored) ---
   distances = (float*)malloc((size_t)numSamples * numSamples * sizeof(float));
@@ -114,6 +133,16 @@ int hierarchicalCluster(
     activePos[i]  = i;
   }
   int numActive = numSamples;
+
+  // --- Per-slot last merge height, for monotonicity clamp.
+  // UPGMA satisfies reducibility, so heights should be non-decreasing along
+  // any root-ward path. Float rounding in repeated Lance-Williams updates can
+  // produce tiny inversions on near-tied data, which manifests as negative
+  // branch lengths in dendrograms. We clamp each merge height up to the max
+  // of its children's last merge heights.
+  lastHeight = (float*)malloc(numSamples * sizeof(float));
+  if (!lastHeight) goto cleanup;
+  for (int i = 0; i < numSamples; i++) lastHeight[i] = 0.0f;
 
   int totalIterations = numSamples - 1;
   lastProgressTime = emscripten_get_now();
@@ -167,20 +196,29 @@ int hierarchicalCluster(
     int sizeB = sizes[minB];
     int newSize = sizeA + sizeB;
 
-    outHeights[iteration] = minDist;
+    // Monotonicity clamp: a merge cannot sit lower than either of its children.
+    float clampedHeight = minDist;
+    if (lastHeight[minA] > clampedHeight) clampedHeight = lastHeight[minA];
+    if (lastHeight[minB] > clampedHeight) clampedHeight = lastHeight[minB];
+    outHeights[iteration] = clampedHeight;
+    // minA is the surviving slot for the merged cluster, so future merges
+    // involving this cluster will read lastHeight[minA]. minB is retired.
+    lastHeight[minA] = clampedHeight;
     outMergeA[iteration]  = minA;
     outMergeB[iteration]  = minB;
 
     // --- Lance-Williams UPGMA distance update ---
-    // Precomputed weights save a division per inner iteration.
-    const float wA = (float)sizeA / (float)newSize;
-    const float wB = (float)sizeB / (float)newSize;
+    // Weights and the multiply-add are computed in double so n-1 chained
+    // updates don't accumulate float32 rounding error in the distance matrix.
+    // Storage stays float for memory; only intermediates are promoted.
+    const double wA = (double)sizeA / (double)newSize;
+    const double wB = (double)sizeB / (double)newSize;
     float* rowA = distances + (size_t)minA * numSamples;
     const float* rowB = distances + (size_t)minB * numSamples;
     for (int ai = 0; ai < numActive; ai++) {
       int k = activeList[ai];
       if (k == minA || k == minB) continue;
-      float newDist = wA * rowA[k] + wB * rowB[k];
+      float newDist = (float)(wA * (double)rowA[k] + wB * (double)rowB[k]);
       rowA[k] = newDist;
       distances[(size_t)k * numSamples + minA] = newDist;
     }
@@ -202,5 +240,6 @@ cleanup:
   free(sizes);
   free(activeList);
   free(activePos);
+  free(lastHeight);
   return rc;
 }

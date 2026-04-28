@@ -88,6 +88,9 @@ export async function hierarchicalClusterWasm(
     if (result === -1) {
       throw new Error('aborted')
     }
+    if (result === -2) {
+      throw new Error('input contains non-finite values (NaN or Infinity)')
+    }
 
     const heights = new Float32Array(numSamples - 1)
     heights.set(
