@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <emscripten.h>
-#include <time.h>
 
 typedef int (*ProgressCallback)(int iteration, int totalIterations);
 
@@ -74,8 +73,8 @@ int hierarchicalCluster(
   distances = (float*)malloc((size_t)numSamples * numSamples * sizeof(float));
   if (!distances) goto cleanup;
 
-  clock_t lastProgressTime = clock();
-  const clock_t progressInterval = CLOCKS_PER_SEC / 10;
+  double lastProgressTime = emscripten_get_now();
+  const double progressIntervalMs = 100.0;
   int totalDistCalcs = numSamples * (numSamples - 1);
   int distCalcsDone = 0;
 
@@ -90,8 +89,8 @@ int hierarchicalCluster(
       distCalcsDone += 2;
 
       if (g_progressCallback) {
-        clock_t now = clock();
-        if (now - lastProgressTime >= progressInterval) {
+        double now = emscripten_get_now();
+        if (now - lastProgressTime >= progressIntervalMs) {
           if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) goto cleanup;
           lastProgressTime = now;
         }
@@ -116,12 +115,12 @@ int hierarchicalCluster(
   int numActive = numSamples;
 
   int totalIterations = numSamples - 1;
-  lastProgressTime = clock();
+  lastProgressTime = emscripten_get_now();
 
   for (int iteration = 0; iteration < totalIterations; iteration++) {
     if (g_progressCallback) {
-      clock_t now = clock();
-      if (now - lastProgressTime >= progressInterval) {
+      double now = emscripten_get_now();
+      if (now - lastProgressTime >= progressIntervalMs) {
         if (g_progressCallback(iteration, totalIterations) == 0) goto cleanup;
         lastProgressTime = now;
       }
