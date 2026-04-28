@@ -1,53 +1,19 @@
-// Regression tests against v3.0.4 published to npm (aliased as hclust-v304).
-// Guards against future changes that would visually alter dendrogram shape.
-// @ts-expect-error - package alias has no bundled types we need
-import { clusterData as clusterDataV304 } from 'hclust-v304'
+// Regression tests against v3.0.4. Fixtures in v304-snapshots.json were
+// captured from running @gmod/hclust@3.0.4 on the datasets in
+// v304-datasets.ts. To regenerate, see scripts/regen-v304-snapshots.ts.
 import { describe, expect, it } from 'vitest'
 
+import { datasets } from './v304-datasets.js'
+import snapshots from './v304-snapshots.json' with { type: 'json' }
 import { clusterData } from '../src/cluster.js'
 
 import type { ClusterNode } from '../src/types.js'
 
-function seededRand(seed: number) {
-  let s = seed >>> 0
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0
-    return s / 4294967296
-  }
-}
-
-function gaussian2D(n: number, seed: number) {
-  const r = seededRand(seed)
-  return Array.from({ length: n }, () => [r() * 10 - 5, r() * 10 - 5])
-}
-
-function clusters3(n: number, seed: number) {
-  const r = seededRand(seed)
-  const centers = [
-    [0, 0],
-    [10, 0],
-    [5, 8],
-  ]
-  return Array.from({ length: n }, (_, i) => {
-    const c = centers[i % 3]!
-    return [c[0]! + r() * 1.5, c[1]! + r() * 1.5]
-  })
-}
-
-// Sparse rows with many duplicates — mimics BigWig coverage / variant-density
-// vectors where most cells are zero and many rows are identical. This pattern
-// produces many tied pairwise distances and exposed the find-min tie-breaking
-// bug that turned the dendrogram into a chain.
-function sparseDuplicates(n: number, seed: number) {
-  const r = seededRand(seed)
-  const W = 100
-  return Array.from({ length: n }, (_, i) => {
-    const row = new Array<number>(W).fill(0)
-    if (i >= n * 0.8) {
-      for (let j = 0; j < W; j++) {if (r() < 0.2) {row[j] = Math.floor(r() * 4)}}
-    }
-    return row
-  })
+interface Snapshot {
+  depth: number
+  lopsidedness: number
+  sortedHeights: number[]
+  partitions: Record<string, string>
 }
 
 function depth(n: ClusterNode): number {
@@ -61,7 +27,9 @@ function leafCount(n: ClusterNode): number {
 // Sum of |leftLeaves - rightLeaves| across internal nodes.
 // Caterpillar = O(n²); balanced = O(n).
 function lopsidedness(n: ClusterNode): number {
-  if (!n.children || n.children.length < 2) {return 0}
+  if (!n.children || n.children.length < 2) {
+    return 0
+  }
   const counts = n.children.map(leafCount)
   return (
     Math.abs(counts[0]! - counts[1]!) +
@@ -69,65 +37,55 @@ function lopsidedness(n: ClusterNode): number {
   )
 }
 
-const datasets: { name: string; data: number[][] }[] = [
-  { name: 'gaussian-20', data: gaussian2D(20, 42) },
-  { name: 'gaussian-40', data: gaussian2D(40, 7) },
-  { name: 'three-clusters-30', data: clusters3(30, 99) },
-  { name: 'three-clusters-60', data: clusters3(60, 1) },
-  { name: 'sparse-duplicates-100', data: sparseDuplicates(100, 5) },
-  { name: 'sparse-duplicates-200', data: sparseDuplicates(200, 11) },
-]
+function collectHeights(n: ClusterNode, out: number[]): number[] {
+  if (n.children) {
+    out.push(n.height)
+    for (const c of n.children) {
+      collectHeights(c, out)
+    }
+  }
+  return out
+}
 
-describe('v3.0.4 compatibility', () => {
+function canonPartitions(clusters: number[][]) {
+  return clusters
+    .map(c => [...c].sort((a, b) => a - b).join(','))
+    .sort()
+    .join('|')
+}
+
+describe('v3.0.4 compatibility (snapshot fixtures)', () => {
   for (const { name, data } of datasets) {
+    const ref = (snapshots as Record<string, Snapshot>)[name]!
+
     it(`${name}: merge heights match v3.0.4 within float tolerance`, async () => {
       const ours = await clusterData({ data })
-      const ref = await clusterDataV304({ data })
-
-      const collect = (n: ClusterNode, out: number[]): number[] => {
-        if (n.children) {
-          out.push(n.height)
-          for (const c of n.children) {collect(c, out)}
-        }
-        return out
-      }
-      const oursHeights = collect(ours.tree, []).sort((a, b) => a - b)
-      const refHeights = collect(ref.tree, []).sort((a, b) => a - b)
-      expect(oursHeights.length).toBe(refHeights.length)
+      const oursHeights = collectHeights(ours.tree, []).sort((a, b) => a - b)
+      expect(oursHeights.length).toBe(ref.sortedHeights.length)
       for (let i = 0; i < oursHeights.length; i++) {
-        expect(oursHeights[i]).toBeCloseTo(refHeights[i]!, 3)
+        expect(oursHeights[i]).toBeCloseTo(ref.sortedHeights[i]!, 3)
       }
     })
 
     it(`${name}: dendrogram shape stays close to v3.0.4`, async () => {
       const ours = await clusterData({ data })
-      const ref = await clusterDataV304({ data })
-
-      const oursDepth = depth(ours.tree)
-      const refDepth = depth(ref.tree)
-      const oursLop = lopsidedness(ours.tree)
-      const refLop = lopsidedness(ref.tree)
-
-      // Within 30% of v3.0.4's metrics — guards against caterpillar regression
+      // Within 30% of v3.0.4 metrics — guards against caterpillar regression
       // without requiring exact-match (last-bit ties resolve differently).
-      expect(oursDepth).toBeLessThanOrEqual(Math.max(refDepth + 2, refDepth * 1.3))
-      expect(oursLop).toBeLessThanOrEqual(Math.max(refLop + 5, refLop * 1.5))
+      expect(depth(ours.tree)).toBeLessThanOrEqual(
+        Math.max(ref.depth + 2, ref.depth * 1.3),
+      )
+      expect(lopsidedness(ours.tree)).toBeLessThanOrEqual(
+        Math.max(ref.lopsidedness + 5, ref.lopsidedness * 1.5),
+      )
     })
 
     it(`${name}: clustersGivenK partitions match v3.0.4`, async () => {
       const ours = await clusterData({ data })
-      const ref = await clusterDataV304({ data })
-
-      const canon = (clusters: number[][]) =>
-        clusters
-          .map(c => [...c].sort((a, b) => a - b).join(','))
-          .sort()
-          .join('|')
-
-      // Compare partitions at K=2..min(5, n-1) — coarse structure should agree
       const maxK = Math.min(5, data.length - 1)
       for (let k = 2; k <= maxK; k++) {
-        expect(canon(ours.clustersGivenK[k]!)).toBe(canon(ref.clustersGivenK[k]!))
+        expect(canonPartitions(ours.clustersGivenK[k]!)).toBe(
+          ref.partitions[`k${k}`],
+        )
       }
     })
   }

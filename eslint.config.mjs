@@ -17,6 +17,7 @@ export default defineConfig(
       'src/distance.js',
       'src/distance.d.ts',
       'src/wasm/distance.d.ts',
+      'scripts/*',
     ],
   },
   {
