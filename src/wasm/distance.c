@@ -22,6 +22,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <emscripten.h>
 
 typedef int (*ProgressCallback)(int iteration, int totalIterations);
@@ -127,12 +128,19 @@ int hierarchicalCluster(
     }
 
     // --- Find minimum distance pair among active slots ---
+    // Tie-break by smallest combined cluster size: with sparse / many-tie
+    // input data (e.g. lots of identical zero-vector rows), strict < tie-
+    // breaking would cause one growing cluster to absorb every tied neighbor
+    // in sequence — a chain dendrogram. Preferring pairs of small clusters
+    // on ties yields a balanced binary merge of the tied points instead.
     float minDist = INFINITY;
     int minA = -1, minB = -1;
+    int minPairSize = INT_MAX;
 
     for (int ai = 0; ai < numActive; ai++) {
       int i = activeList[ai];
       const float* row = distances + (size_t)i * numSamples;
+      int sizeI = sizes[i];
       for (int aj = ai + 1; aj < numActive; aj++) {
         int j = activeList[aj];
         float d = row[j];
@@ -140,6 +148,14 @@ int hierarchicalCluster(
           minDist = d;
           minA = i;
           minB = j;
+          minPairSize = sizeI + sizes[j];
+        } else if (d == minDist) {
+          int pairSize = sizeI + sizes[j];
+          if (pairSize < minPairSize) {
+            minA = i;
+            minB = j;
+            minPairSize = pairSize;
+          }
         }
       }
     }
