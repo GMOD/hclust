@@ -46,10 +46,9 @@ describe('wasm-wrapper', () => {
 
     await hierarchicalClusterWasm({ data })
 
-    expect(mockModule._malloc).toHaveBeenCalledTimes(5)
+    expect(mockModule._malloc).toHaveBeenCalledTimes(4)
     expect(mockModule._malloc).toHaveBeenCalledWith(6 * 4)
     expect(mockModule._malloc).toHaveBeenCalledWith(1 * 4)
-    expect(mockModule._malloc).toHaveBeenCalledWith(2 * 4)
   })
 
   it('should free all allocated memory', async () => {
@@ -63,7 +62,7 @@ describe('wasm-wrapper', () => {
 
     await hierarchicalClusterWasm({ data })
 
-    expect(mockModule._free).toHaveBeenCalledTimes(5)
+    expect(mockModule._free).toHaveBeenCalledTimes(4)
   })
 
   it('should copy input data to WASM memory', async () => {
@@ -101,7 +100,6 @@ describe('wasm-wrapper', () => {
       expect.any(Number),
       expect.any(Number),
       expect.any(Number),
-      expect.any(Number),
     )
   })
 
@@ -133,7 +131,7 @@ describe('wasm-wrapper', () => {
     await expect(
       hierarchicalClusterWasm({ data, checkCancellation }),
     ).rejects.toThrow('aborted')
-    expect(mockModule._free).toHaveBeenCalledTimes(5)
+    expect(mockModule._free).toHaveBeenCalledTimes(4)
   })
 
   it('should build tree from merge information', async () => {
@@ -233,6 +231,8 @@ describe('wasm-wrapper', () => {
     const mergeBOffset = mergeAOffset + (numSamples - 1)
     const orderOffset = mergeBOffset + (numSamples - 1)
 
+    mockModule.HEAP32[mergeAOffset] = 0
+    mockModule.HEAP32[mergeBOffset] = 1
     mockModule.HEAP32[orderOffset] = 0
     mockModule.HEAP32[orderOffset + 1] = 1
 
@@ -365,7 +365,7 @@ describe('wasm-wrapper', () => {
       hierarchicalClusterWasm({ data, checkCancellation }),
     ).rejects.toThrow()
 
-    expect(mockModule._free).toHaveBeenCalledTimes(5)
+    expect(mockModule._free).toHaveBeenCalledTimes(4)
   })
 
   it('should cleanup callback even if checkCancellation throws', async () => {

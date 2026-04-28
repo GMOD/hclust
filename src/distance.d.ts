@@ -21,7 +21,6 @@ interface ClusteringModule {
     outHeights: number,
     outMergeA: number,
     outMergeB: number,
-    outOrder: number,
   ) => number
   _setProgressCallback: (callbackPtr: number) => void
   addFunction: (fn: Function, signature: string) => number

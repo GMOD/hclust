@@ -50,7 +50,6 @@ export async function hierarchicalClusterWasm(
   const heightsPtr = module._malloc((numSamples - 1) * 4)
   const mergeAPtr = module._malloc((numSamples - 1) * 4)
   const mergeBPtr = module._malloc((numSamples - 1) * 4)
-  const orderPtr = module._malloc(numSamples * 4)
 
   let callbackPtr: number | null = null
 
@@ -84,7 +83,6 @@ export async function hierarchicalClusterWasm(
       heightsPtr,
       mergeAPtr,
       mergeBPtr,
-      orderPtr,
     )
 
     if (result === -1) {
@@ -106,10 +104,13 @@ export async function hierarchicalClusterWasm(
       module.HEAP32.subarray(mergeBPtr / 4, mergeBPtr / 4 + numSamples - 1),
     )
 
-    const order = new Int32Array(numSamples)
-    order.set(module.HEAP32.subarray(orderPtr / 4, orderPtr / 4 + numSamples))
-
-    const tree = rebuildTree(numSamples, heights, mergeA, mergeB, sampleLabels)
+    const { tree, leafOrder } = rebuildTree(
+      numSamples,
+      heights,
+      mergeA,
+      mergeB,
+      sampleLabels,
+    )
     const merges: [number, number][] = []
     for (let i = 0; i < numSamples - 1; i++) {
       merges.push([mergeA[i]!, mergeB[i]!])
@@ -117,7 +118,7 @@ export async function hierarchicalClusterWasm(
 
     return {
       tree,
-      order: Array.from(order),
+      order: leafOrder,
       heights,
       merges,
     }
@@ -131,31 +132,41 @@ export async function hierarchicalClusterWasm(
     module._free(heightsPtr)
     module._free(mergeAPtr)
     module._free(mergeBPtr)
-    module._free(orderPtr)
   }
 }
 
 // Rebuilds the tree from stable slot indices (mergeA[i] < mergeB[i] always).
 // Slot mergeA[i] absorbs mergeB[i] each iteration, so nodes[0] is always the root.
+// At every merge the smaller subtree is placed on the left so the dendrogram is
+// balanced visually rather than degenerating into a caterpillar when slot 0
+// keeps absorbing. leafOrder is the left-to-right leaf sequence of that tree.
 function rebuildTree(
   numSamples: number,
   heights: Float32Array,
   mergeA: Int32Array,
   mergeB: Int32Array,
   sampleLabels?: string[],
-): ClusterNode {
-  const nodes: ClusterNode[] = []
+) {
+  const nodes: ClusterNode[] = new Array(numSamples)
+  const leaves: number[][] = new Array(numSamples)
   for (let i = 0; i < numSamples; i++) {
-    nodes.push({ name: sampleLabels?.[i] ?? `Sample ${i}`, height: 0 })
+    nodes[i] = { name: sampleLabels?.[i] ?? `Sample ${i}`, height: 0 }
+    leaves[i] = [i]
   }
   for (let i = 0; i < numSamples - 1; i++) {
-    const a = mergeA[i]!,
-      b = mergeB[i]!
-    nodes[a] = {
+    const dst = mergeA[i]!
+    let small = dst
+    let large = mergeB[i]!
+    if (leaves[small]!.length > leaves[large]!.length) {
+      small = mergeB[i]!
+      large = dst
+    }
+    nodes[dst] = {
       name: `Cluster ${i}`,
       height: heights[i]!,
-      children: [nodes[a]!, nodes[b]!],
+      children: [nodes[small]!, nodes[large]!],
     }
+    leaves[dst] = leaves[small]!.concat(leaves[large]!)
   }
-  return nodes[0]!
+  return { tree: nodes[0]!, leafOrder: leaves[0]! }
 }

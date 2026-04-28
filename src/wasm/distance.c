@@ -15,7 +15,8 @@
  *    Slot 0 is always the final root.
  *  - Lance-Williams O(1) distance update per active cluster pair.
  *  - Active-index list for O(n) find-minimum scan over live clusters only.
- *  - Linked-list order tracking: O(1) append per merge.
+ *  - Leaf order is derived on the JS side from a left-to-right traversal of the
+ *    rebuilt tree, so this routine only emits merges + heights.
  */
 
 #include <math.h>
@@ -33,7 +34,11 @@ void setProgressCallback(ProgressCallback callback) {
   g_progressCallback = callback;
 }
 
-static float euclideanDistance(const float* a, const float* b, int size) {
+static float euclideanDistance(
+  const float* __restrict__ a,
+  const float* __restrict__ b,
+  int size
+) {
   float sum = 0.0f;
   int i = 0;
   for (; i + 3 < size; i += 4) {
@@ -57,12 +62,17 @@ int hierarchicalCluster(
   int vectorSize,
   float* outHeights,
   int* outMergeA,
-  int* outMergeB,
-  int* outOrder
+  int* outMergeB
 ) {
+  int rc = -1;
+  float* distances  = NULL;
+  int*   sizes      = NULL;
+  int*   activeList = NULL;
+  int*   activePos  = NULL;
+
   // --- Distance matrix (full n×n, upper triangle computed, mirrored) ---
-  float* distances = (float*)malloc(numSamples * numSamples * sizeof(float));
-  if (!distances) return -1;
+  distances = (float*)malloc((size_t)numSamples * numSamples * sizeof(float));
+  if (!distances) goto cleanup;
 
   clock_t lastProgressTime = clock();
   const clock_t progressInterval = CLOCKS_PER_SEC / 10;
@@ -70,21 +80,19 @@ int hierarchicalCluster(
   int distCalcsDone = 0;
 
   for (int i = 0; i < numSamples; i++) {
-    distances[i * numSamples + i] = 0.0f;
-    const float* vecA = data + i * vectorSize;
+    float* row = distances + (size_t)i * numSamples;
+    row[i] = 0.0f;
+    const float* vecA = data + (size_t)i * vectorSize;
     for (int j = i + 1; j < numSamples; j++) {
-      float d = euclideanDistance(vecA, data + j * vectorSize, vectorSize);
-      distances[i * numSamples + j] = d;
-      distances[j * numSamples + i] = d;
+      float d = euclideanDistance(vecA, data + (size_t)j * vectorSize, vectorSize);
+      row[j] = d;
+      distances[(size_t)j * numSamples + i] = d;
       distCalcsDone += 2;
 
       if (g_progressCallback) {
         clock_t now = clock();
         if (now - lastProgressTime >= progressInterval) {
-          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) {
-            free(distances);
-            return -1;
-          }
+          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) goto cleanup;
           lastProgressTime = now;
         }
       }
@@ -92,39 +100,20 @@ int hierarchicalCluster(
   }
 
   // --- Cluster sizes (for Lance-Williams weights) ---
-  int* sizes = (int*)malloc(numSamples * sizeof(int));
-  if (!sizes) { free(distances); return -1; }
+  sizes = (int*)malloc(numSamples * sizeof(int));
+  if (!sizes) goto cleanup;
   for (int i = 0; i < numSamples; i++) sizes[i] = 1;
 
   // --- Active-index list: activeList[0..numActive-1] holds live slot IDs ---
   // activePos[slot] = position in activeList for O(1) swap-with-last removal
-  int* activeList = (int*)malloc(numSamples * sizeof(int));
-  int* activePos  = (int*)malloc(numSamples * sizeof(int));
-  if (!activeList || !activePos) {
-    free(distances); free(sizes); free(activeList); free(activePos); return -1;
-  }
+  activeList = (int*)malloc(numSamples * sizeof(int));
+  activePos  = (int*)malloc(numSamples * sizeof(int));
+  if (!activeList || !activePos) goto cleanup;
   for (int i = 0; i < numSamples; i++) {
     activeList[i] = i;
     activePos[i]  = i;
   }
   int numActive = numSamples;
-
-  // --- Linked-list order tracking ---
-  // listNext[i] = next sample index in leaf order (-1 = end)
-  // listHead[slot] = first sample, listTail[slot] = last sample
-  int* listNext = (int*)malloc(numSamples * sizeof(int));
-  int* listHead = (int*)malloc(numSamples * sizeof(int));
-  int* listTail = (int*)malloc(numSamples * sizeof(int));
-  if (!listNext || !listHead || !listTail) {
-    free(distances); free(sizes); free(activeList); free(activePos);
-    free(listNext); free(listHead); free(listTail);
-    return -1;
-  }
-  for (int i = 0; i < numSamples; i++) {
-    listNext[i] = -1;
-    listHead[i] = i;
-    listTail[i] = i;
-  }
 
   int totalIterations = numSamples - 1;
   lastProgressTime = clock();
@@ -133,11 +122,7 @@ int hierarchicalCluster(
     if (g_progressCallback) {
       clock_t now = clock();
       if (now - lastProgressTime >= progressInterval) {
-        if (g_progressCallback(iteration, totalIterations) == 0) {
-          free(distances); free(sizes); free(activeList); free(activePos);
-          free(listNext); free(listHead); free(listTail);
-          return -1;
-        }
+        if (g_progressCallback(iteration, totalIterations) == 0) goto cleanup;
         lastProgressTime = now;
       }
     }
@@ -148,9 +133,10 @@ int hierarchicalCluster(
 
     for (int ai = 0; ai < numActive; ai++) {
       int i = activeList[ai];
+      const float* row = distances + (size_t)i * numSamples;
       for (int aj = ai + 1; aj < numActive; aj++) {
         int j = activeList[aj];
-        float d = distances[i * numSamples + j];
+        float d = row[j];
         if (d < minDist) {
           minDist = d;
           minA = i;
@@ -166,19 +152,22 @@ int hierarchicalCluster(
     int sizeB = sizes[minB];
     int newSize = sizeA + sizeB;
 
-    // Record merge
     outHeights[iteration] = minDist;
     outMergeA[iteration]  = minA;
     outMergeB[iteration]  = minB;
 
     // --- Lance-Williams UPGMA distance update ---
+    // Precomputed weights save a division per inner iteration.
+    const float wA = (float)sizeA / (float)newSize;
+    const float wB = (float)sizeB / (float)newSize;
+    float* rowA = distances + (size_t)minA * numSamples;
+    const float* rowB = distances + (size_t)minB * numSamples;
     for (int ai = 0; ai < numActive; ai++) {
       int k = activeList[ai];
       if (k == minA || k == minB) continue;
-      float newDist = ((float)sizeA * distances[minA * numSamples + k] +
-                       (float)sizeB * distances[minB * numSamples + k]) / (float)newSize;
-      distances[minA * numSamples + k] = newDist;
-      distances[k * numSamples + minA] = newDist;
+      float newDist = wA * rowA[k] + wB * rowB[k];
+      rowA[k] = newDist;
+      distances[(size_t)k * numSamples + minA] = newDist;
     }
 
     sizes[minA] = newSize;
@@ -189,26 +178,14 @@ int hierarchicalCluster(
     activeList[posB]    = lastSlot;
     activePos[lastSlot] = posB;
     numActive--;
-
-    // --- Append minB's leaf list to minA ---
-    listNext[listTail[minA]] = listHead[minB];
-    listTail[minA]           = listTail[minB];
   }
 
-  // --- Write out leaf order from slot 0's linked list ---
-  int cur = listHead[0];
-  for (int i = 0; i < numSamples; i++) {
-    outOrder[i] = cur;
-    cur = listNext[cur];
-  }
+  rc = 0;
 
+cleanup:
   free(distances);
   free(sizes);
   free(activeList);
   free(activePos);
-  free(listNext);
-  free(listHead);
-  free(listTail);
-
-  return 0;
+  return rc;
 }
