@@ -1,6 +1,6 @@
 import createClusteringModule from './distance.js'
 
-import type { ClusterNode } from './types.js'
+import type { ClusterNode, NumericVector } from './types.js'
 
 type ClusteringModule = Awaited<ReturnType<typeof createClusteringModule>>
 
@@ -24,7 +24,7 @@ export interface ClusteringResult {
 }
 
 export interface ClusteringOptions {
-  data: number[][]
+  data: NumericVector[]
   sampleLabels?: string[]
   statusCallback?: (message: string) => void
   checkCancellation?: () => void

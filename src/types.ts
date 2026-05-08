@@ -10,15 +10,20 @@ export interface ClusterResult {
   clustersGivenK: number[][][]
 }
 
+// A row vector. Accepts plain arrays, typed arrays, or anything else with a
+// numeric length and indexed numeric entries — the WASM bridge copies via
+// Float32Array.set which handles all of these uniformly.
+export type NumericVector = ArrayLike<number>
+
 export interface ClusterOptions {
-  data: number[][]
+  data: NumericVector[]
   sampleLabels?: string[]
   onProgress?: (message: string) => void
   checkCancellation?: () => void
 }
 
 export interface ClusterObjectOptions {
-  data: Record<string, number[]>
+  data: Record<string, NumericVector>
   onProgress?: (message: string) => void
   checkCancellation?: () => void
 }
