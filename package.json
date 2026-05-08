@@ -1,6 +1,6 @@
 {
   "name": "@gmod/hclust",
-  "version": "3.0.11",
+  "version": "3.0.12",
   "description": "Hierarchical clustering",
   "keywords": [
     "jbrowse",
