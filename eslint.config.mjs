@@ -35,6 +35,7 @@ export default defineConfig(
   importPlugin.flatConfigs.recommended,
   {
     rules: {
+      '@typescript-eslint/parameter-properties': 'error',
       'no-empty': 'off',
       'no-console': [
         'warn',
