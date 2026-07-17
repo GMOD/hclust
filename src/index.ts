@@ -4,5 +4,6 @@ export type {
   ClusterNode,
   ClusterObjectOptions,
   ClusterOptions,
+  ClusterProgress,
   ClusterResult,
 } from './types.js'

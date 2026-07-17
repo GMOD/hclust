@@ -12,7 +12,12 @@ export async function clusterData({
   onProgress,
   checkCancellation,
 }: ClusterOptions): Promise<ClusterResult> {
-  onProgress?.('Running hierarchical clustering in WASM...')
+  onProgress?.({
+    phase: 'init',
+    message: 'Running hierarchical clustering in WASM',
+    current: 0,
+    total: 0,
+  })
 
   const result = await hierarchicalClusterWasm({
     data,

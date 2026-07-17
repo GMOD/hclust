@@ -91,9 +91,12 @@ describe('clusterData', () => {
 
     await clusterData({ data, onProgress })
 
-    expect(onProgress).toHaveBeenCalledWith(
-      'Running hierarchical clustering in WASM...',
-    )
+    expect(onProgress).toHaveBeenCalledWith({
+      phase: 'init',
+      message: 'Running hierarchical clustering in WASM',
+      current: 0,
+      total: 0,
+    })
     expect(hierarchicalClusterWasm).toHaveBeenCalledWith(
       expect.objectContaining({
         statusCallback: onProgress,

@@ -15,15 +15,29 @@ export interface ClusterResult {
 // Float32Array.set which handles all of these uniformly.
 export type NumericVector = ArrayLike<number>
 
+/**
+ * A progress report from a run. `current`/`total` are raw counts rather than a
+ * preformatted percentage so callers can drive a determinate progress bar; they
+ * are both 0 for the 'init' phase, which has no meaningful denominator and
+ * should render as indeterminate. `message` is an unformatted phase label — it
+ * carries no percentage, so append one from `current`/`total` if you want it.
+ */
+export interface ClusterProgress {
+  phase: 'init' | 'distance' | 'clustering'
+  message: string
+  current: number
+  total: number
+}
+
 export interface ClusterOptions {
   data: NumericVector[]
   sampleLabels?: string[]
-  onProgress?: (message: string) => void
+  onProgress?: (progress: ClusterProgress) => void
   checkCancellation?: () => void
 }
 
 export interface ClusterObjectOptions {
   data: Record<string, NumericVector>
-  onProgress?: (message: string) => void
+  onProgress?: (progress: ClusterProgress) => void
   checkCancellation?: () => void
 }

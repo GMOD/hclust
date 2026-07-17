@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { clusterData, clusterObject } from '../src/cluster.js'
 
+import type { ClusterProgress } from '../src/types.js'
+
 function sortedClusters(clusters: number[][]) {
   return clusters
     .map(c => [...c].sort((a, b) => a - b))
@@ -104,12 +106,35 @@ describe('clusterData integration', () => {
 
   it('fires progress callbacks during real clustering', async () => {
     const data = Array.from({ length: 10 }, (_, i) => [i])
-    const messages: string[] = []
+    const progress: ClusterProgress[] = []
 
-    await clusterData({ data, onProgress: msg => messages.push(msg) })
+    await clusterData({ data, onProgress: p => progress.push(p) })
 
-    expect(messages.length).toBeGreaterThan(0)
-    expect(messages[0]).toBe('Running hierarchical clustering in WASM...')
+    expect(progress.length).toBeGreaterThan(0)
+    expect(progress[0]).toEqual({
+      phase: 'init',
+      message: 'Running hierarchical clustering in WASM',
+      current: 0,
+      total: 0,
+    })
+  })
+
+  // the C side throttles to one progress callback per 100ms, so a small run can
+  // legitimately emit nothing past 'init' — assert the invariant on whatever
+  // does arrive rather than requiring any. The phase-to-report mapping itself is
+  // covered deterministically in wasm-wrapper.test.ts.
+  it('never reports a determinate phase without a usable denominator', async () => {
+    const data = Array.from({ length: 40 }, (_, i) => [i, i * 2])
+    const progress: ClusterProgress[] = []
+
+    await clusterData({ data, onProgress: p => progress.push(p) })
+
+    for (const p of progress.filter(p => p.phase !== 'init')) {
+      expect(p.total).toBeGreaterThan(0)
+      expect(p.current).toBeGreaterThanOrEqual(0)
+      expect(p.current).toBeLessThanOrEqual(p.total)
+      expect(p.message).not.toMatch(/%/)
+    }
   })
 
   it('handles equal distances deterministically', async () => {

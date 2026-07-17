@@ -49,6 +49,29 @@ const result = await clusterData({
 })
 ```
 
+## Progress
+
+Pass `onProgress` to observe a run. Reports arrive at most once per 100ms, so a
+small run may only ever emit the `init` phase:
+
+```typescript
+clusterData({
+  data,
+  onProgress: ({ phase, message, current, total }) => {
+    // phase: 'init' | 'distance' | 'clustering'
+    // 'init' carries no denominator (total === 0) — render it indeterminate
+    const label = total
+      ? `${message}: ${Math.round((current / total) * 100)}%`
+      : message
+    console.log(label)
+  },
+})
+```
+
+`message` is an unformatted phase label and `current`/`total` are raw counts, so
+a caller can drive a determinate progress bar. Percentages are never
+preformatted into `message` — append your own.
+
 ## Cancellation
 
 Pass `checkCancellation: () => void` to throw and cancel:

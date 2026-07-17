@@ -1,6 +1,6 @@
 import createClusteringModule from './distance.js'
 
-import type { ClusterNode, NumericVector } from './types.js'
+import type { ClusterNode, ClusterProgress, NumericVector } from './types.js'
 
 type ClusteringModule = Awaited<ReturnType<typeof createClusteringModule>>
 
@@ -26,7 +26,7 @@ export interface ClusteringResult {
 export interface ClusteringOptions {
   data: NumericVector[]
   sampleLabels?: string[]
-  statusCallback?: (message: string) => void
+  statusCallback?: (progress: ClusterProgress) => void
   checkCancellation?: () => void
 }
 
@@ -60,14 +60,22 @@ export async function hierarchicalClusterWasm(
       const progressCallback = (iteration: number, totalIterations: number) => {
         checkCancellation?.()
         if (statusCallback) {
-          if (iteration < 0) {
-            const distancesDone = -iteration
-            const progress = Math.round((distancesDone / totalIterations) * 100)
-            statusCallback(`Computing distance matrix: ${progress}%`)
-          } else {
-            const progress = Math.round((iteration / totalIterations) * 100)
-            statusCallback(`Clustering samples: ${progress}%`)
-          }
+          // the C side flags the distance-matrix phase with a negative count
+          statusCallback(
+            iteration < 0
+              ? {
+                  phase: 'distance',
+                  message: 'Computing distance matrix',
+                  current: -iteration,
+                  total: totalIterations,
+                }
+              : {
+                  phase: 'clustering',
+                  message: 'Clustering samples',
+                  current: iteration,
+                  total: totalIterations,
+                },
+          )
         }
         return 1
       }

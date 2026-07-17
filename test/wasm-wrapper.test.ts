@@ -304,6 +304,45 @@ describe('wasm-wrapper', () => {
     expect(mockModule._setProgressCallback).toHaveBeenCalledWith(12345)
   })
 
+  it('should report raw counts per phase, with the distance phase flagged by a negative count', async () => {
+    const data = [
+      [1, 2],
+      [3, 4],
+    ]
+    const statusCallback = vi.fn()
+
+    mockModule.HEAPF32.fill(0)
+    mockModule.HEAP32.fill(0)
+
+    let capturedCallback: ((iter: number, total: number) => number) | undefined
+    mockModule.addFunction.mockImplementation(
+      (fn: (iter: number, total: number) => number) => {
+        capturedCallback = fn
+        return 12345
+      },
+    )
+    mockModule._hierarchicalCluster.mockImplementation(() => {
+      capturedCallback?.(-3, 10)
+      capturedCallback?.(7, 9)
+      return 0
+    })
+
+    await hierarchicalClusterWasm({ data, statusCallback })
+
+    expect(statusCallback).toHaveBeenNthCalledWith(1, {
+      phase: 'distance',
+      message: 'Computing distance matrix',
+      current: 3,
+      total: 10,
+    })
+    expect(statusCallback).toHaveBeenNthCalledWith(2, {
+      phase: 'clustering',
+      message: 'Clustering samples',
+      current: 7,
+      total: 9,
+    })
+  })
+
   it('should setup progress callback when checkCancellation is provided', async () => {
     const data = [
       [1, 2],
