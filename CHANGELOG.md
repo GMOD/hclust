@@ -1,3 +1,9 @@
+## [4.0.3](https://github.com/GMOD/hclust/compare/v4.0.2...v4.0.3) (2026-08-04)
+
+### Bug Fixes
+
+- Format the generated changelog, so a release can reach publish
+
 ## [4.0.2](https://github.com/GMOD/hclust/compare/v4.0.1...v4.0.2) (2026-08-04)
 
 ### Bug Fixes
