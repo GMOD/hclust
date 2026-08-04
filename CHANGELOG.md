@@ -1,3 +1,21 @@
+## [4.0.2](https://github.com/GMOD/hclust/compare/v4.0.1...v4.0.2) (2026-08-04)
+
+### Bug Fixes
+
+- Quote node names in toNewick, and read quoted labels in fromNewick
+
+### Chores
+
+- Add git-cliff for changelog generation
+
+### Documentation
+
+- Mark breaking changes in the generated changelog
+
+### Other Changes
+
+- Backfill changelog
+
 ## [4.0.1](https://github.com/GMOD/hclust/compare/v4.0.0...v4.0.1) (2026-07-25)
 
 ### Chores
