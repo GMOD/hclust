@@ -35,8 +35,10 @@
   "scripts": {
     "test": "vitest",
     "lint": "eslint --report-unused-disable-directives --max-warnings 0",
+    "typecheck": "tsc --noEmit -p tsconfig.lint.json",
     "clean": "rimraf dist esm tsconfig.build.tsbuildinfo",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build:wasm": "bash scripts/build_wasm.sh && cp src/wasm/distance.js src/wasm/distance.d.ts src/",
     "build:esm": "tsc --outDir esm",
     "build:cjs": "tsc --module commonjs --moduleResolution bundler --outDir dist",

@@ -501,7 +501,6 @@ describe('wasm-wrapper', () => {
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
-    // @ts-expect-error - mocked module type doesn't match real type
     const createModuleMock = (await import('../src/distance.js')).default
     const initialCallCount = vi.mocked(createModuleMock).mock.calls.length
 
