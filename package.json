@@ -12,7 +12,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GMOD/hclust.git"
+    "url": "git+https://github.com/GMOD/hclust.git"
   },
   "author": "JBrowse Team",
   "type": "module",
