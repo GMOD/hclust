@@ -1,18 +1,13 @@
-name: CI
+name: Push
 
-on:
-  push:
-    branches: [main, master]
-    tags: ['v*']
-  pull_request:
-    branches: [main, master]
+on: push
 
 jobs:
   test:
+    name: Lint, build, and test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -25,7 +20,6 @@ jobs:
         with:
           version: 5.0.0
       - run: pnpm install --frozen-lockfile
-      - run: pnpm prettier --check .
       - run: pnpm lint
       # eslint doesn't enforce formatting, so without this the tree drifts out
       # of prettier's shape silently and the next person to touch a file gets
@@ -35,9 +29,8 @@ jobs:
       # which is otherwise never type-checked: a test can call a renamed option
       # or a changed signature and go on passing by testing nothing.
       - run: pnpm typecheck
-      - run: pnpm tsc --noEmit
       - run: pnpm build
-      - run: pnpm vitest run
+      - run: pnpm test --run
 
   publish:
     name: Publish to npm
