@@ -45,7 +45,7 @@
     "build": "pnpm build:wasm && pnpm build:esm && pnpm build:cjs",
     "prebuild": "pnpm clean",
     "postbuild": "echo '{\"type\": \"commonjs\"}' > dist/package.json",
-    "preversion": "pnpm lint && pnpm build && pnpm test --run",
+    "preversion": "pnpm lint && pnpm format:check && pnpm build && pnpm test --run",
     "version": "git-cliff --tag v$npm_package_version --unreleased --prepend CHANGELOG.md && prettier --write CHANGELOG.md && git add CHANGELOG.md",
     "postversion": "git push --follow-tags"
   },
