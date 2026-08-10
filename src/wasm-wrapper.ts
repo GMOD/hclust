@@ -1,4 +1,4 @@
-import createClusteringModule from './distance.js'
+import createClusteringModule from './wasm/distance.js'
 
 import type { ClusterNode, ClusterProgress, NumericVector } from './types.js'
 

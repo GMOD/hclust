@@ -13,7 +13,7 @@ const mockModule = {
   HEAP32: new Int32Array(1000),
 }
 
-vi.mock('../src/distance.js', () => ({
+vi.mock('../src/wasm/distance.js', () => ({
   default: vi.fn(() => Promise.resolve(mockModule)),
 }))
 
@@ -501,7 +501,7 @@ describe('wasm-wrapper', () => {
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
-    const createModuleMock = (await import('../src/distance.js')).default
+    const createModuleMock = (await import('../src/wasm/distance.js')).default
     const initialCallCount = vi.mocked(createModuleMock).mock.calls.length
 
     await hierarchicalClusterWasm({ data })
