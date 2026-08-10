@@ -30,22 +30,23 @@
   },
   "files": [
     "dist",
-    "esm"
+    "esm",
+    "src"
   ],
   "scripts": {
     "test": "vitest",
     "lint": "eslint --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.lint.json",
-    "clean": "rimraf dist esm tsconfig.build.tsbuildinfo",
+    "clean": "rimraf dist esm",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "build:wasm": "bash scripts/build_wasm.sh && cp src/wasm/distance.js src/wasm/distance.d.ts src/",
     "build:esm": "tsc --outDir esm",
-    "build:cjs": "tsc --module commonjs --moduleResolution bundler --outDir dist",
-    "build": "pnpm build:wasm && pnpm build:esm && pnpm build:cjs",
+    "build:es5": "tsc --module commonjs --moduleResolution bundler --outDir dist",
+    "build": "pnpm build:wasm && pnpm build:esm && pnpm build:es5",
     "prebuild": "pnpm clean",
-    "postbuild": "echo '{\"type\": \"commonjs\"}' > dist/package.json",
-    "preversion": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm test --run",
+    "postbuild:es5": "echo '{\"type\": \"commonjs\"}' > dist/package.json",
+    "preversion": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test --run && pnpm build",
     "version": "git-cliff --tag v$npm_package_version --unreleased --prepend CHANGELOG.md && prettier --write CHANGELOG.md && git add CHANGELOG.md",
     "postversion": "git push --follow-tags"
   },
@@ -62,5 +63,6 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
-  }
+  },
+  "main": "dist/index.js"
 }
