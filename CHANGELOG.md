@@ -1,3 +1,21 @@
+## [4.0.4](https://github.com/GMOD/hclust/compare/v4.0.3...v4.0.4) (2026-08-10)
+
+### Bug Fixes
+
+- Track the wasm bundle where its siblings do, not a copy of it
+
+### Chores
+
+- Type-check the tests and enforce prettier, as @gmod/bam does
+- Let npm publish stop auto-correcting repository.url
+- Exempt our own packages from the release quarantine
+- Bump pnpm/action-setup to v6.0.10 and setup-emsdk to v16
+- Align the workflow with the shape every other gmod repo uses
+- Emscripten 5.0.0 -> 6.0.6, bundle rebuilt
+- Gate preversion on format:check, as CI does
+- Gate preversion on typecheck too, as CI does
+- Converge package.json on the shape its siblings use
+
 ## [4.0.3](https://github.com/GMOD/hclust/compare/v4.0.2...v4.0.3) (2026-08-04)
 
 ### Bug Fixes

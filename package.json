@@ -1,6 +1,6 @@
 {
   "name": "@gmod/hclust",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "packageManager": "pnpm@11.15.1",
   "description": "Hierarchical clustering",
   "keywords": [
