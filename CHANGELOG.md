@@ -98,40 +98,13 @@
 
 ### Other Changes
 
-- Replace v3.0.4 dev-dependency with snapshot fixtures
-
-The v3.0.4 compat tests previously imported @gmod/hclust@3.0.4 via a package
-alias. Capture v3.0.4's outputs once into test/v304-snapshots.json and compare
-against those fixtures instead — drops the devDep so we can publish cleanly.
-
-- test/v304-snapshots.json: depth, lopsidedness, sorted heights, and K=2..5
-  partitions for each dataset, captured from v3.0.4 output.
-- test/v304-datasets.ts: shared dataset definitions, used by both the test and
-  the regenerator.
-- scripts/regen-v304-snapshots.ts: one-off generator. Documents the pnpm add /
-  run / pnpm remove dance for refreshing the fixtures.
+- Replace v3.0.4 dev-dependency with snapshot fixtures ([e39b43c](https://github.com/GMOD/hclust/commit/e39b43c581e765fbe99b5484aa90d2e0295271be))
 
 ## [3.0.9](https://github.com/GMOD/hclust/compare/v3.0.8...v3.0.9) (2026-04-28)
 
 ### Other Changes
 
-- Fix find-min tie-breaking that produced caterpillar trees on sparse data
-
-c896acb's perf rewrite kept strict < comparison in the find-min loop, so when
-the distance matrix had many tied values (sparse / many-duplicate input rows
-like BigWig coverage or variant density), the lowest-numbered slot would absorb
-every tied neighbor in sequence — producing a near-caterpillar dendrogram.
-v3.0.4 happened to avoid this because newly- merged clusters were appended to
-the end of its shifting array and so were considered last in find-min iteration.
-
-Add an explicit tie-break: on equal distance, prefer the pair with smallest
-combined cluster size. Yields balanced merges of tied points, matching v3.0.4's
-shape on real-world variant data (1094 leaves: depth 192→39, lopsidedness
-54472→18545, vs v3.0.4's 39 / 18793).
-
-Add v3.0.4 compat tests using @gmod/hclust@3.0.4 aliased as a devDep, covering
-gaussian, three-cluster, and sparse-duplicate inputs. The sparse cases are the
-actual regression for this bug.
+- Fix find-min tie-breaking that produced caterpillar trees on sparse data ([d002291](https://github.com/GMOD/hclust/commit/d002291405394bb11fe2c6f447b39bc6c4d663a0))
 
 ## [3.0.8](https://github.com/GMOD/hclust/compare/v3.0.7...v3.0.8) (2026-04-28)
 
@@ -148,24 +121,7 @@ actual regression for this bug.
 ### Other Changes
 
 - Add LICENSE file
-- Restore v3.0.4 dendrogram shape; remove linked-list order tracking
-
-The Lance-Williams perf rewrite in c896acb made the lower-numbered slot always
-absorb, so slot 0 grew into a giant subtree that got placed as the left child at
-every merge — the dendrogram visually degenerated into a caterpillar. Leaf order
-was biased the same way, ending up roughly sorted by sample index instead of
-following tree traversal.
-
-- rebuildTree now places the smaller subtree on the left at every merge and
-  derives leafOrder from a left-to-right traversal of the result, matching
-  v3.0.4's visual layout.
-- Drop the linked-list order tracking from distance.c (3 mallocs, init, splice,
-  output walk) and the outOrder parameter — leafOrder is built on the JS side
-  from the tree.
-- distance.c perf pass: precompute Lance-Williams weights once per merge (saves
-  O(n²) divisions), hoist row pointers in find-min and LW update, add
-  **restrict** to euclideanDistance, size_t casts on index math, goto-cleanup
-  pattern for single-exit error handling.
+- Restore v3.0.4 dendrogram shape; remove linked-list order tracking ([c77072f](https://github.com/GMOD/hclust/commit/c77072f1af39b243f3bd0c91cbe42eb3a7d857ef))
 
 ## [3.0.6](https://github.com/GMOD/hclust/compare/v3.0.5...v3.0.6) (2026-04-27)
 
