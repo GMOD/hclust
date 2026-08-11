@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { clusterData, clusterObject } from '../src/cluster.js'
+import { clusterData, clusterObject } from '../src/cluster.ts'
 
-import type { ClusterProgress } from '../src/types.js'
+import type { ClusterProgress } from '../src/types.ts'
 
 function sortedClusters(clusters: number[][]) {
   return clusters

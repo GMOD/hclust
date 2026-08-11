@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { hierarchicalClusterWasm } from '../src/wasm-wrapper.js'
+import { hierarchicalClusterWasm } from '../src/wasm-wrapper.ts'
 
 const mockModule = {
   _malloc: vi.fn(),

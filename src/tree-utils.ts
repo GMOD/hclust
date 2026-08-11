@@ -1,4 +1,4 @@
-import type { ClusterNode } from './types.js'
+import type { ClusterNode } from './types.ts'
 
 export function printTree(
   node: ClusterNode,

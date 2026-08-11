@@ -1,10 +1,10 @@
-import { hierarchicalClusterWasm } from './wasm-wrapper.js'
+import { hierarchicalClusterWasm } from './wasm-wrapper.ts'
 
 import type {
   ClusterObjectOptions,
   ClusterOptions,
   ClusterResult,
-} from './types.js'
+} from './types.ts'
 
 export async function clusterData({
   data,

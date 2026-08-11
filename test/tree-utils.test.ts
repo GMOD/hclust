@@ -6,9 +6,9 @@ import {
   quoteName,
   toNewick,
   treeToJSON,
-} from '../src/tree-utils.js'
+} from '../src/tree-utils.ts'
 
-import type { ClusterNode } from '../src/types.js'
+import type { ClusterNode } from '../src/types.ts'
 
 describe('tree-utils', () => {
   describe('printTree', () => {

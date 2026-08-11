@@ -1,6 +1,6 @@
 import createClusteringModule from './wasm/distance.js'
 
-import type { ClusterNode, ClusterProgress, NumericVector } from './types.js'
+import type { ClusterNode, ClusterProgress, NumericVector } from './types.ts'
 
 type ClusteringModule = Awaited<ReturnType<typeof createClusteringModule>>
 
