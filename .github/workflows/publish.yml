@@ -31,6 +31,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test --run
+      # `pnpm test` runs against src/, so it cannot see the shape of the
+      # published package. This packs and installs it, and clusters through
+      # both entry points, to catch a wasm bundle missing from esm/ or dist/.
+      - run: pnpm test:pack
 
   publish:
     name: Publish to npm
