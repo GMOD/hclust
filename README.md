@@ -55,7 +55,10 @@ Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
   `children`.
 - `order: number[]` — sample indices in left-to-right leaf order.
 - `clustersGivenK: number[][][]` — `clustersGivenK[k]` is the partition into
-  `k+1` clusters, each cluster an array of sample indices.
+  `k+1` clusters, each cluster an array of sample indices. It holds every level
+  at once, so it costs O(N²) memory (~330MB at N=3000) and is computed on first
+  access rather than up front. Leave it alone if you only need `tree` and
+  `order`.
 
 ## Input
 

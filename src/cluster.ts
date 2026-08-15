@@ -26,12 +26,29 @@ export async function clusterData({
     checkCancellation,
   })
 
-  // Build clustersGivenK from stable-slot merge sequence.
-  // mergeA[i] and mergeB[i] are stable slot indices; slot mergeA[i] absorbs mergeB[i].
-  // clustersGivenK[k] = cluster partitions when there are k+1 clusters (k=0..N-1).
+  // Lazy because it is O(N^2): every one of the N levels snapshots the whole
+  // partition, so it is ~9M index cells at N=3000 — dwarfing the tree itself,
+  // and wasted on the many callers that only want `tree` and `order`.
+  // Bound to numSamples/merges rather than to `data` and `result`, so the
+  // returned object doesn't pin the input matrix for its lifetime.
   const numSamples = data.length
-  const clustersGivenK: number[][][] = []
+  const { merges } = result
+  let cached: number[][][] | undefined
+  return {
+    tree: result.tree,
+    order: result.order,
+    get clustersGivenK() {
+      cached ??= buildClustersGivenK(numSamples, merges)
+      return cached
+    },
+  }
+}
 
+// mergeA[i] and mergeB[i] are stable slot indices; slot mergeA[i] absorbs
+// mergeB[i]. Snapshots run from N clusters down to 1, so the result is
+// reversed to put clustersGivenK[k] at k+1 clusters.
+function buildClustersGivenK(numSamples: number, merges: [number, number][]) {
+  const clustersGivenK: number[][][] = []
   const membership: number[][] = Array.from({ length: numSamples }, (_, i) => [
     i,
   ])
@@ -41,7 +58,7 @@ export async function clusterData({
   }
 
   for (let i = 0; i < numSamples - 1; i++) {
-    const [a, b] = result.merges[i]!
+    const [a, b] = merges[i]!
 
     const snapshot: number[][] = []
     for (const id of activeSlots) {
@@ -61,11 +78,7 @@ export async function clusterData({
   }
   clustersGivenK.push(finalSnapshot)
 
-  return {
-    tree: result.tree,
-    order: result.order,
-    clustersGivenK: clustersGivenK.reverse(),
-  }
+  return clustersGivenK.reverse()
 }
 
 export async function clusterObject({
