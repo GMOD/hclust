@@ -63,24 +63,24 @@ Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
 - `order: number[]` — sample indices in left-to-right leaf order.
 - `clustersGivenK: number[][][]` — `clustersGivenK[k]` is the partition into
   `k+1` clusters, each cluster an array of sample indices. It holds every level
-  at once, so it costs O(N²) memory (~330MB at N=3000) and is computed on first
+  at once, so it costs O(N²) memory (~330MB at N=3000) and builds on first
   access rather than up front. Leave it alone if you only need `tree` and
   `order`.
 
 ## Input
 
 - At least 2 samples, or `clusterData` throws.
-- Every row the same length as the first, which sets the vector size. Ragged
-  input is not validated: a short row is zero-padded, a long one overruns into
-  the next sample.
+- Every row the same length as the first, which sets the vector size. Nothing
+  validates ragged input: a short row picks up zero padding, a long one overruns
+  into the next sample.
 - No `NaN` or `Infinity`, or `clusterData` throws.
-- Without `sampleLabels`, leaves are named `Sample 0`, `Sample 1`, …
+- Without `sampleLabels`, leaves come back as `Sample 0`, `Sample 1`, …
 
 ## Other exports
 
-- `toNewick(node)` / `fromNewick(string)` — Newick serialization. Internal node
-  height is encoded as the label (`(A,B)1.2345`); `fromNewick` also accepts
-  branch-length (`:`) form.
+- `toNewick(node)` / `fromNewick(string)` — Newick serialization. An internal
+  node carries its height as the label (`(A,B)1.2345`); `fromNewick` also
+  accepts branch-length (`:`) form.
 - `quoteName(name)` — the Newick quoting rule `toNewick` uses, exported so a
   caller writing its own Newick escapes names the same way `fromNewick` expects.
 - `treeToJSON(node)` — plain-object copy of a tree, dropping empty `children`.
@@ -106,7 +106,7 @@ clusterData({
 ```
 
 `message` is an unformatted phase label and `current`/`total` are raw counts, so
-a caller can drive a determinate progress bar.
+a caller can drive a determinate progress bar off them.
 
 ## Cancellation
 
@@ -121,7 +121,7 @@ clusterData({
 })
 ```
 
-It is called on the same 100ms tick as `onProgress`, so cancellation lands
+The run calls it on the same 100ms tick as `onProgress`, so cancellation lands
 within about 100ms — and a run short enough to never report progress never
 checks at all. See [docs/cancellation.md](docs/cancellation.md) for cancelling
 from a web worker.

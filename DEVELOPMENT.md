@@ -38,7 +38,7 @@ From a one-off comparison against the pure-JS implementation:
 
 ### Prerequisites
 
-Emscripten SDK must be installed and activated:
+Install and activate the Emscripten SDK:
 
 ```bash
 cd ~/emsdk
@@ -64,7 +64,7 @@ pnpm clean
 ```
 
 A rebuild must reproduce the tracked `src/wasm/distance.js` byte for byte —
-`preversion` runs `pnpm build`, so a bundle that differs would be committed
+`preversion` runs `pnpm build`, so a bundle that differs lands in a commit
 part-way through a release. Check with `pnpm build:wasm && git status`.
 
 ## File Structure
@@ -85,8 +85,8 @@ scripts/
 └── regen-v304-snapshots.ts # Regenerates the v3.0.4 comparison fixtures
 ```
 
-`distance.js` is tracked in git so that installing the package needs no
-emscripten. There is no separate `.wasm` file — `SINGLE_FILE=1` inlines it.
+Git tracks `distance.js` so that installing the package needs no emscripten.
+There is no separate `.wasm` file — `SINGLE_FILE=1` inlines it.
 
 ## C Code Optimizations
 
