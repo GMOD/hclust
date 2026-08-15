@@ -1,3 +1,34 @@
+## [4.1.0](https://github.com/GMOD/hclust/compare/v4.0.4...v4.1.0) (2026-08-15)
+
+### Bug Fixes
+
+- Import siblings by their real .ts extension so the source can be type-stripped ([0030541](https://github.com/GMOD/hclust/commit/003054173f0f9ddfc0f2708947b52f9ac0989492))
+
+### Chores
+
+- Render only the commit subject, and link the commit ([d3b4dc9](https://github.com/GMOD/hclust/commit/d3b4dc94fe3c292bdac1d800c8d90b656cf10d6c))
+- Create a GitHub release for each published tag ([6f26c3a](https://github.com/GMOD/hclust/commit/6f26c3a2f51bc824c07df60993c53468bebca50d))
+- Bring tsconfig in line with the other gmod repos ([2b61814](https://github.com/GMOD/hclust/commit/2b61814557a4ad50e39f8b39e522e4a231e27dde))
+- Keep agent worktrees out of the toolchain's way ([c74503b](https://github.com/GMOD/hclust/commit/c74503b525f490807e76053b2c81b9e484a4ac6f))
+
+### Documentation
+
+- Document the full result shape and the remaining exports ([2afd8b2](https://github.com/GMOD/hclust/commit/2afd8b24942d936cc8173ae24794dd197bb4381f))
+- Refresh DEVELOPMENT.md, drop the yarn lockfile ([650e59c](https://github.com/GMOD/hclust/commit/650e59c6bfe1d418963c2438d3cddfdfbb67c7d7))
+- Record how the clustering got from 71s to 0.16s ([5f715bb](https://github.com/GMOD/hclust/commit/5f715bbbc28cd17fd6bea5a59edf26f2c1d8d719))
+- Add the progress-callback cost to the optimization history ([19a48c2](https://github.com/GMOD/hclust/commit/19a48c2ab0d8b1c43953e5b4291606b0964403b0))
+
+### Performance Improvements
+
+- Build clustersGivenK on first access ([d51749e](https://github.com/GMOD/hclust/commit/d51749e34db555d5e518e5a2af901f02e1a3a5b5))
+- Cache each cluster's nearest neighbour instead of rescanning all pairs ([e6ed69e](https://github.com/GMOD/hclust/commit/e6ed69e97da9ab7bf15556bc240d1bce684fa8cf))
+- Stop reading the clock once per distance pair ([ac57be9](https://github.com/GMOD/hclust/commit/ac57be9a7f02b1998c855c5dd3ab781046493cb0))
+
+### Tests
+
+- Assert the packed artifact clusters through both entry points ([c594380](https://github.com/GMOD/hclust/commit/c594380163990ec4153fe45b7c2a3fd9dfcbf815))
+- Benchmark the callback path, and correct the SIMD note ([570bf35](https://github.com/GMOD/hclust/commit/570bf35d6d7e146df0c836f1894a9b0a9f9b5e05))
+
 ## [4.0.4](https://github.com/GMOD/hclust/compare/v4.0.3...v4.0.4) (2026-08-10)
 
 ### Bug Fixes
