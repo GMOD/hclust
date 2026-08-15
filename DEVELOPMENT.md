@@ -1,4 +1,4 @@
-# Development Guide for @jbrowse/clustering
+# Development Guide for @gmod/hclust
 
 ## Architecture
 
@@ -24,7 +24,7 @@ This package uses a hybrid approach:
 
 ## Performance Benchmarks
 
-From testing (see `/benchmark_wasm.js` in project root):
+From a one-off comparison against the pure-JS implementation:
 
 | Samples | JS Baseline | WASM f32 | Improvement |
 | ------- | ----------- | -------- | ----------- |
@@ -47,44 +47,46 @@ cd ~/emsdk
 source ./emsdk_env.sh
 ```
 
-Or use the provided script:
-
-```bash
-bash ../setup_emscripten.sh
-```
+`build:wasm` sources `emsdk_env.sh` itself, from `$EMSDK` or `~/emsdk`, so
+`emcc` does not need to be on your PATH.
 
 ### Build Commands
 
 ```bash
 # Build WASM module only
-yarn build:wasm
+pnpm build:wasm
 
 # Build entire package (WASM + TypeScript)
-yarn build
+pnpm build
 
 # Clean build artifacts
-yarn clean
+pnpm clean
 ```
+
+A rebuild must reproduce the tracked `src/wasm/distance.js` byte for byte —
+`preversion` runs `pnpm build`, so a bundle that differs would be committed
+part-way through a release. Check with `pnpm build:wasm && git status`.
 
 ## File Structure
 
 ```
-packages/clustering/
-├── src/
-│   ├── wasm/
-│   │   ├── distance.c          # C source for WASM
-│   │   ├── distance.js         # Emscripten-generated JS glue
-│   │   └── distance.wasm       # Compiled WASM binary
-│   ├── wasm-wrapper.ts         # TypeScript wrapper for WASM
-│   ├── cluster.ts              # Main clustering algorithm
-│   ├── tree-utils.ts           # Tree output formatting
-│   ├── types.ts                # TypeScript type definitions
-│   └── index.ts                # Package exports
-├── scripts/
-│   └── build_wasm.sh           # WASM build script
-├── example.js                  # Usage example
-└── package.json
+src/
+├── wasm/
+│   ├── distance.c          # C source for WASM
+│   ├── distance.js         # Emscripten output, WASM inlined as base64 (tracked)
+│   └── distance.d.ts       # Hand-written types for the bundle above
+├── wasm-wrapper.ts         # TypeScript wrapper for WASM
+├── cluster.ts              # Main clustering algorithm
+├── tree-utils.ts           # Tree output formatting
+├── types.ts                # TypeScript type definitions
+└── index.ts                # Package exports
+scripts/
+├── build_wasm.sh           # WASM build script
+└── regen-v304-snapshots.ts # Regenerates the v3.0.4 comparison fixtures
 ```
+
+`distance.js` is tracked in git so that installing the package needs no
+emscripten. There is no separate `.wasm` file — `SINGLE_FILE=1` inlines it.
 
 ## C Code Optimizations
 
@@ -97,15 +99,21 @@ The C code includes several optimizations:
 
 ## Emscripten Compiler Flags
 
+See `scripts/build_wasm.sh` for the full command. The flags worth knowing:
+
 ```bash
-emcc distance.c \
   -O3                              # Maximum optimization
-  -s WASM=1                        # Output WASM
+  -msimd128                        # SIMD
   -s ALLOW_MEMORY_GROWTH=1         # Dynamic memory
   -s INITIAL_MEMORY=64MB           # Start with 64MB
   -s MAXIMUM_MEMORY=2GB            # Allow up to 2GB
-  -s MODULARIZE=1                  # ES6 module
-  -s EXPORT_ES6=1                  # ES6 exports
+  -s MODULARIZE=1 -s EXPORT_ES6=1  # ES6 module
+  -s SINGLE_FILE=1                 # Inline the wasm as base64
+  -s ENVIRONMENT='web,worker'      # Not 'node': that init path emits a
+                                   # top-level `await import("node:module")`
+                                   # webpack 5 cannot resolve, and inlined
+                                   # wasm never needs it. Node satisfies the
+                                   # `web` path via atob + WebAssembly.
 ```
 
 ## Future Optimizations
@@ -121,12 +129,13 @@ Potential improvements:
 ## Testing
 
 ```bash
-# Run tests
-yarn test
+# Run tests (watch mode; --run for one pass)
+pnpm test
 
-# Run with coverage
-yarn coverage
-
-# Try the example
-node example.js
+# Everything CI runs, in CI's order
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test --run && pnpm build
 ```
+
+Some tests compare against fixtures captured from v3.0.4. If the output format
+changes deliberately, regenerate them — `scripts/regen-v304-snapshots.ts`
+carries the three commands at the top of the file.
