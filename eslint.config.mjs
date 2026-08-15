@@ -18,6 +18,11 @@ export default defineConfig(
       'src/distance.d.ts',
       'src/wasm/distance.d.ts',
       'scripts/*',
+      // agent worktrees are whole checkouts of this repo living inside it, so
+      // without this eslint lints every one of them against the root
+      // tsconfig.lint.json and fails on files that are not in it. gitignored,
+      // but eslint does not read .gitignore
+      '.claude/**',
     ],
   },
   {
