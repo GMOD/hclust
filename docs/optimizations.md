@@ -136,7 +136,8 @@ progress reports. Polling the clock every 1024th pair puts that back to 1.0×.
 
 The lesson is narrower than "don't call JS from wasm": it is that a benchmark
 which omits an optional argument is not benchmarking the caller's configuration.
-Both paths now measure the same.
+Both paths now measure the same, and `benchmarks/cluster.bench.ts` runs both so
+the next divergence shows up as a number rather than a bug report.
 
 ## Results
 
@@ -174,18 +175,29 @@ identical rows the speedup over step 2 is ~2–3× rather than ~40×. That is th
 sparse-coverage-vector shape, so real genomic input often lands closer to the
 low end.
 
-**Memory is now the ceiling, not time.** The distance matrix is a full N×N
-float32: 400MB at N=10,000, 900MB at N=15,000. Measured, N=10,000 clusters in
-5.5s and N=15,000 in 16.6s — both comfortably fast, and the second is close to
-what a wasm32 heap can hold. Storing only the upper triangle would halve it and
-is the obvious next move if that ceiling ever binds.
+**Memory is the ceiling, not time.** The distance matrix is a full N×N float32:
+400MB at N=10,000, 1.6GB at N=20,000. The build caps the heap at 2GB
+(`MAXIMUM_MEMORY` in `scripts/build_wasm.sh`), and measured against that,
+N=20,000 clusters in 18.2s while N=24,000 fails the allocation — reporting the
+size it could not get, rather than the "aborted" it used to claim. Storing only
+the upper triangle would halve the matrix and roughly double that ceiling; the
+cost is that the merge loop reads both `[i][j]` and the mirrored `[j][i]`, so
+one of the two becomes a strided access. Worth measuring before assuming it
+wins.
 
-**The distance matrix build is now ~40% of the run** (measured: 828ms of 2.3s at
-N=10,000) and is untouched by any of this. Now that the merge loop is quadratic
-too, that share stays roughly constant with N, which makes it the next thing
-worth a profile. `-msimd128` is the obvious lever; the `double` accumulation
-that keeps long vectors stable limits how much of it vectorises, so it needs
-measuring rather than assuming.
+**The distance matrix build is ~40% of the run** (measured: 828ms of 2.3s at
+N=10,000), and now that the merge loop is quadratic too, that share stays
+roughly constant with N.
+
+It is already vectorised, and not by accident: `scripts/build_wasm.sh` has
+carried `-msimd128` all along. Disassembling the module confirms the kernel
+compiles to `v128.load64_zero` → `f64x2.promote_low_f32x4` → `f64x2.sub` →
+`f64x2.mul` → `f64x2.add`. Note the width — `f64x2` is **two** elements per
+operation, not four, because the accumulator is `double`. Going to `f32x4` would
+double the kernel's throughput, for about 20% off the total, and would give back
+exactly the numerical stability step 3 was added to buy. That is a bad trade for
+a library whose output people publish, so the remaining headroom here is
+deliberately left on the table.
 
 ## Methodology
 
