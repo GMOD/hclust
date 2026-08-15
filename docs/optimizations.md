@@ -120,6 +120,24 @@ reason. Slot id is now the final tie-break, making the order total and the
 choice canonical. The v3.0.4 compatibility snapshots — including the tie-heavy
 `sparse-duplicates` datasets — pass unchanged.
 
+## 5. Stop reading the clock per pair
+
+_`ac57be9`, Aug 2026._
+
+Everything above was benchmarked with no progress callback, which turned out to
+hide the single largest cost on the path JBrowse actually uses. `onProgress`
+registers a callback, and the distance-matrix loop then called
+`emscripten_get_now()` — a wasm→JS call — once per pair, purely to decide
+whether 100ms had elapsed. The guard cost several times more than the distance
+it guarded.
+
+**5000 samples: 464ms without a callback, 1063ms with one**, to deliver nine
+progress reports. Polling the clock every 1024th pair puts that back to 1.0×.
+
+The lesson is narrower than "don't call JS from wasm": it is that a benchmark
+which omits an optional argument is not benchmarking the caller's configuration.
+Both paths now measure the same.
+
 ## Results
 
 Three C generations, same data, same binary, best of 3 runs (ms):
@@ -162,9 +180,12 @@ float32: 400MB at N=10,000, 900MB at N=15,000. Measured, N=10,000 clusters in
 what a wasm32 heap can hold. Storing only the upper triangle would halve it and
 is the obvious next move if that ceiling ever binds.
 
-**The distance matrix build is O(N²·V)** and untouched by any of this. It is a
-small share of the total now that the merge loop is quadratic, but it is the
-next thing that would show up in a profile.
+**The distance matrix build is now ~40% of the run** (measured: 828ms of 2.3s at
+N=10,000) and is untouched by any of this. Now that the merge loop is quadratic
+too, that share stays roughly constant with N, which makes it the next thing
+worth a profile. `-msimd128` is the obvious lever; the `double` accumulation
+that keeps long vectors stable limits how much of it vectorises, so it needs
+measuring rather than assuming.
 
 ## Methodology
 
