@@ -99,6 +99,12 @@ export async function hierarchicalClusterWasm(
     if (result === -2) {
       throw new Error('input contains non-finite values (NaN or Infinity)')
     }
+    if (result === -3) {
+      const gb = ((numSamples * numSamples * 4) / 1e9).toFixed(2)
+      throw new Error(
+        `out of memory clustering ${numSamples} samples: the distance matrix alone needs ${gb}GB`,
+      )
+    }
 
     const heights = new Float32Array(numSamples - 1)
     heights.set(

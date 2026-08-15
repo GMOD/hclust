@@ -107,7 +107,11 @@ int hierarchicalCluster(
   int* outMergeA,
   int* outMergeB
 ) {
-  int rc = -1;
+  // -3 until proven otherwise: every allocation below jumps to cleanup on
+  // failure, and reporting that as -1 told the caller its own cancellation had
+  // fired. The n x n matrix is 400MB at n=10,000, so this is a reachable
+  // outcome on real input, not a theoretical one.
+  int rc = -3;
   float* distances  = NULL;
   int*   sizes      = NULL;
   int*   activeList = NULL;
@@ -136,6 +140,15 @@ int hierarchicalCluster(
   int totalDistCalcs = numSamples * (numSamples - 1);
   int distCalcsDone = 0;
 
+  // Reading the clock is a wasm->JS call (performance.now()), so doing it once
+  // per pair — as this used to — costs several times more than the distance it
+  // guards: with a callback registered, n=5000 went from 464ms to 1063ms to
+  // deliver nine progress reports. Sample it every 1024th pair instead. That is
+  // well under the 100ms report interval at any realistic vector width, so the
+  // cadence is unchanged and the check leaves the profile.
+  const int clockPollInterval = 1024;
+  int sinceClockPoll = 0;
+
   for (int i = 0; i < numSamples; i++) {
     float* row = distances + (size_t)i * numSamples;
     row[i] = 0.0f;
@@ -146,10 +159,14 @@ int hierarchicalCluster(
       distances[(size_t)j * numSamples + i] = d;
       distCalcsDone += 2;
 
-      if (g_progressCallback) {
+      if (g_progressCallback && ++sinceClockPoll >= clockPollInterval) {
+        sinceClockPoll = 0;
         double now = emscripten_get_now();
         if (now - lastProgressTime >= progressIntervalMs) {
-          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) goto cleanup;
+          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) {
+            rc = -1;
+            goto cleanup;
+          }
           lastProgressTime = now;
         }
       }
@@ -204,7 +221,10 @@ int hierarchicalCluster(
     if (g_progressCallback) {
       double now = emscripten_get_now();
       if (now - lastProgressTime >= progressIntervalMs) {
-        if (g_progressCallback(iteration, totalIterations) == 0) goto cleanup;
+        if (g_progressCallback(iteration, totalIterations) == 0) {
+          rc = -1;
+          goto cleanup;
+        }
         lastProgressTime = now;
       }
     }
