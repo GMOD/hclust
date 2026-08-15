@@ -16,10 +16,11 @@ then merges the closest clusters at each step until one cluster remains,
 producing a dendrogram. Equivalent to R's `hclust(method="average")`.
 
 Roughly O(N²) in time and memory: 3,000 samples cluster in ~0.3s and 10,000 in
-~4s. Input with many tied distances (identical or near-identical rows) is
+~5.5s. Input with many tied distances (identical or near-identical rows) is
 several times slower, since a tie forces a rescan for a new nearest neighbour.
 The N×N distance matrix sets the ceiling — 400MB at N=10,000 — so very large
-inputs run out of memory before they run out of time.
+inputs run out of memory before they run out of time. See
+[docs/optimizations.md](docs/optimizations.md) for how this got fast.
 
 ## Usage
 
