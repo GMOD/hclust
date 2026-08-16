@@ -1,3 +1,14 @@
+## [4.1.1](https://github.com/GMOD/hclust/compare/v4.1.0...v4.1.1) (2026-08-16)
+
+### Documentation
+
+- Put the prose in the active voice ([49eafa1](https://github.com/GMOD/hclust/commit/49eafa17cfd20b8c0d37d11fd677697160023fae))
+- Correct the release command in CONTRIBUTING, and its voice ([a875ebb](https://github.com/GMOD/hclust/commit/a875ebb1494c3c16418f23121c2c54753a2c0a25))
+
+### Refactoring
+
+- Parse newick via @gmod/newick, and stop recursing ([b3f77e1](https://github.com/GMOD/hclust/commit/b3f77e1be1a0499540c23462c96ee5da6330b630))
+
 ## [4.1.0](https://github.com/GMOD/hclust/compare/v4.0.4...v4.1.0) (2026-08-15)
 
 ### Bug Fixes
