@@ -1,21 +1,35 @@
-import type { ClusterNode } from './types.ts'
+import { parseNewick } from '@gmod/newick'
 
+import type { ClusterNode } from './types.ts'
+import type { NewickNode } from '@gmod/newick'
+
+// Iterative for the same reason toNewick is. The stack carries each node's own
+// prefix, since it depends on the whole chain of ancestors above it.
 export function printTree(
   node: ClusterNode,
   indent = '',
   isLast = true,
 ): string {
-  const prefix = indent + (isLast ? '└── ' : '├── ')
-  let output = `${prefix}${node.name} h=${node.height.toFixed(2)}\n`
-
-  if (node.children) {
-    const newIndent = indent + (isLast ? '    ' : '│   ')
-    for (let i = 0; i < node.children.length; i++) {
-      const isLastChild = i === node.children.length - 1
-      output += printTree(node.children[i]!, newIndent, isLastChild)
+  let output = ''
+  const stack = [{ node, indent, isLast }]
+  while (stack.length > 0) {
+    const frame = stack.pop()!
+    const prefix = frame.indent + (frame.isLast ? '└── ' : '├── ')
+    output += `${prefix}${frame.node.name} h=${frame.node.height.toFixed(2)}\n`
+    const kids = frame.node.children
+    if (kids) {
+      const childIndent = frame.indent + (frame.isLast ? '    ' : '│   ')
+      // reversed, so the leftmost child pops first and the output reads the same
+      // as the recursive version's
+      for (let i = kids.length - 1; i >= 0; i--) {
+        stack.push({
+          node: kids[i]!,
+          indent: childIndent,
+          isLast: i === kids.length - 1,
+        })
+      }
     }
   }
-
   return output
 }
 
@@ -53,134 +67,96 @@ export function quoteName(name: string): string {
 // one leaf into two so the tree comes back the wrong shape with every later leaf
 // shifted onto its neighbour's name.
 export function toNewick(node: ClusterNode): string {
-  if (!node.children || node.children.length === 0) {
-    return quoteName(node.name)
-  }
-
-  const childStrings = node.children.map(child => toNewick(child))
-  return `(${childStrings.join(',')})${node.height.toFixed(4)}`
-}
-
-function newNode(): ClusterNode {
-  return { name: '', height: 0 }
-}
-
-interface Token {
-  text: string
-  // a bare grammar character, as opposed to label text that happens to equal one
-  delim: boolean
-  // arrived single-quoted, so it is a label whatever it looks like
-  quoted: boolean
-}
-
-// Split into grammar characters and labels. A hand-rolled scanner rather than
-// the `split(/\s*(;|\(|\)|,|:)\s*/)` this used to be, because a regex split
-// cannot know it is inside a quoted label and so splits the label apart on the
-// very characters quoting exists to protect.
-//
-// Whitespace is consumed around the delimiters and kept inside labels, so a bare
-// `Sample 0` still reads as one name; inside quotes it is kept verbatim.
-function tokenize(s: string): Token[] {
-  const out: Token[] = []
-  // text since the last delimiter, kept apart so a quoted label can own the
-  // token: whitespace written around the quotes is layout in a hand-formatted
-  // file, not part of the name
-  let bare = ''
-  let quotedText = ''
-  let quoted = false
-  const flush = () => {
-    const text = quoted ? quotedText : bare.trim()
-    // an empty run between two delimiters is not a label; an explicitly quoted
-    // '' is one, so it survives
-    if (text !== '' || quoted) {
-      out.push({ text, delim: false, quoted })
-    }
-    bare = ''
-    quotedText = ''
-    quoted = false
-  }
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i]!
-    if (c === "'") {
-      quoted = true
-      for (i++; i < s.length; i++) {
-        if (s[i] !== "'") {
-          quotedText += s[i]!
-        } else if (s[i + 1] === "'") {
-          // '' is an escaped literal quote, not the end of the label
-          quotedText += "'"
-          i++
-        } else {
-          break
-        }
+  // Iterative, because a single-linkage dendrogram chains: clustering N samples
+  // can produce a tree nearly N deep, and recursing threw
+  // "RangeError: Maximum call stack size exceeded" past about 5000 -- on the
+  // library's own output, through its main serializer.
+  //
+  // Post-order (children before parents) so a node's subtrees are already
+  // rendered when it is reached.
+  const order: ClusterNode[] = []
+  const stack = [node]
+  while (stack.length > 0) {
+    const n = stack.pop()!
+    order.push(n)
+    if (n.children) {
+      for (const child of n.children) {
+        stack.push(child)
       }
-    } else if (c === '(' || c === ')' || c === ',' || c === ':' || c === ';') {
-      flush()
-      out.push({ text: c, delim: true, quoted: false })
+    }
+  }
+
+  const rendered = new Map<ClusterNode, string>()
+  for (let i = order.length - 1; i >= 0; i--) {
+    const n = order[i]!
+    if (n.children?.length) {
+      // drop each child's string as it is folded into the parent. Recursion
+      // freed these as it unwound; holding the whole map to the end instead
+      // means every intermediate subtree string is live at once, which for a
+      // caterpillar is quadratic and ran a 50k-leaf tree out of heap.
+      const parts = n.children.map(c => {
+        const s = rendered.get(c)!
+        rendered.delete(c)
+        return s
+      })
+      rendered.set(n, `(${parts.join(',')})${n.height.toFixed(4)}`)
     } else {
-      bare += c
+      rendered.set(n, quoteName(n.name))
     }
   }
-  flush()
-  return out
+  return rendered.get(node)!
 }
 
+/**
+ * Read Newick into a `ClusterNode`.
+ *
+ * `postParenNumeric: 'length'` because `toNewick` above writes an internal
+ * node's merge height as its post-paren label rather than as a `:` branch
+ * length, and that number is the whole point of a dendrogram. The parser's
+ * default would only read it as a height while the tree carries no `:` anywhere,
+ * which is true of what `toNewick` writes but not of a phylogeny somebody hands
+ * us.
+ */
 export function fromNewick(s: string): ClusterNode {
-  const ancestors: ClusterNode[] = []
-  let tree = newNode()
-  const tokens = tokenize(s)
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!
-    const subtree = newNode()
-    if (token.delim) {
-      switch (token.text) {
-        case '(':
-          tree.children = [subtree]
-          ancestors.push(tree)
-          tree = subtree
-          break
-        case ',':
-          ancestors.at(-1)?.children?.push(subtree)
-          tree = subtree
-          break
-        case ')':
-          tree = ancestors.pop()!
-          break
-        default:
-          // ':' and ';' are consumed by the label that follows them
-          break
+  const parsed = parseNewick(s, { postParenNumeric: 'length' })
+  const asCluster = (n: NewickNode): ClusterNode => ({
+    name: n.name ?? '',
+    height: n.length ?? 0,
+  })
+
+  // iterative, like the parser it calls: a single-linkage dendrogram chains, so
+  // this tree can be nearly as deep as it has leaves
+  const root = asCluster(parsed)
+  const stack = [{ source: parsed, target: root }]
+  while (stack.length > 0) {
+    const { source, target } = stack.pop()!
+    if (source.children) {
+      target.children = source.children.map(asCluster)
+      for (const [i, child] of source.children.entries()) {
+        stack.push({ source: child, target: target.children[i]! })
       }
-      continue
-    }
-    const prev = tokens[i - 1]
-    const x = prev?.delim ? prev.text : undefined
-    if (x === ')') {
-      // A QUOTED token after `)` is a name whatever it looks like: quoting is
-      // the writer saying this is a label, and it is the only way to call a
-      // node `1.5`.
-      const num = token.quoted ? Number.NaN : Number.parseFloat(token.text)
-      if (!Number.isNaN(num)) {
-        tree.height = num
-      } else {
-        tree.name = token.text
-      }
-    } else if (x === '(' || x === ',' || (x === undefined && !prev)) {
-      tree.name = token.text
-    } else if (x === ':') {
-      tree.height = Number.parseFloat(token.text)
     }
   }
-
-  return tree
+  return root
 }
 
+// Iterative for the same reason toNewick is -- the tree it copies can be nearly
+// as deep as it has leaves.
 export function treeToJSON(node: ClusterNode): ClusterNode {
-  if (!node.children?.length) {
-    return { name: node.name, height: node.height }
+  const plain = (n: ClusterNode): ClusterNode => ({
+    name: n.name,
+    height: n.height,
+  })
+  const root = plain(node)
+  const stack = [{ source: node, target: root }]
+  while (stack.length > 0) {
+    const { source, target } = stack.pop()!
+    if (source.children?.length) {
+      target.children = source.children.map(plain)
+      for (const [i, child] of source.children.entries()) {
+        stack.push({ source: child, target: target.children[i]! })
+      }
+    }
   }
-  return {
-    name: node.name,
-    height: node.height,
-    children: node.children.map(treeToJSON),
-  }
+  return root
 }

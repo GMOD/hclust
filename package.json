@@ -67,5 +67,8 @@
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
   },
-  "main": "dist/index.js"
+  "main": "dist/index.js",
+  "dependencies": {
+    "@gmod/newick": "^1.0.1"
+  }
 }

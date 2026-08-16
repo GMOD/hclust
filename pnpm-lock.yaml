@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@gmod/newick':
+        specifier: ^1.0.1
+        version: 1.0.1
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -96,6 +100,9 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@gmod/newick@1.0.1':
+    resolution: {integrity: sha512-cgcuLbW+Vf1IALwOCqVA+KwKokZtuXaEvY7CJVlwuzLtNl2r2oYKpCNXrnG3ASJOjyrX3lrNr62iLEsZgXCprg==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -1282,6 +1289,8 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
+
+  '@gmod/newick@1.0.1': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

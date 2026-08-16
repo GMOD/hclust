@@ -452,3 +452,32 @@ describe('tree-utils', () => {
     })
   })
 })
+
+// Single-linkage clustering chains, so clustering N samples can produce a tree
+// nearly N deep. Every one of these recursed and threw
+// "RangeError: Maximum call stack size exceeded" past about 5000 -- on this
+// library's own output, through its own serializer. 10k clears that comfortably
+// while staying fast; the string work is quadratic in depth, so 50k takes 12s.
+describe('deep trees', () => {
+  function chain(n: number): ClusterNode {
+    let t: ClusterNode = { name: 'l0', height: 0 }
+    for (let i = 1; i < n; i++) {
+      t = { name: '', height: i, children: [t, { name: `l${i}`, height: 0 }] }
+    }
+    return t
+  }
+
+  it('serializes and reads back a 10,000-deep dendrogram', () => {
+    const tree = chain(10_000)
+    const newick = toNewick(tree)
+    expect(treeToJSON(tree)).toBeTruthy()
+
+    let depth = 0
+    let node = fromNewick(newick)
+    while (node.children) {
+      depth++
+      node = node.children[0]!
+    }
+    expect(depth).toBe(9_999)
+  })
+})
