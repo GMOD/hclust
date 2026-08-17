@@ -78,9 +78,10 @@ Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
 
 ## Other exports
 
-- `toNewick(node)` / `fromNewick(string)` — Newick serialization. An internal
-  node carries its height as the label (`(A,B)1.2345`); `fromNewick` also
-  accepts branch-length (`:`) form.
+- `toNewick(node)` / `fromNewick(string)` — Newick serialization, writing merge
+  heights as `:` branch lengths (`(A:1.5,B:1.5)`). `fromNewick` reads that back
+  into absolute heights, and still accepts the label form v4 wrote
+  (`(A,B)1.5000`). See [docs/newick.md](docs/newick.md).
 - `quoteName(name)` — the Newick quoting rule `toNewick` uses, exported so a
   caller writing its own Newick escapes names the same way `fromNewick` expects.
 - `treeToJSON(node)` — plain-object copy of a tree, dropping empty `children`.

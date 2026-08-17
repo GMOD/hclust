@@ -56,9 +56,32 @@ export function quoteName(name: string): string {
   return NEEDS_QUOTING.test(name) ? `'${name.replaceAll("'", "''")}'` : name
 }
 
+const PRECISION = 4
+
+// Round to what the serializer prints, so branch lengths telescope exactly:
+// summing (parent - child) down a path of printed values lands back on the
+// printed root height, however deep the tree. Differencing the unrounded
+// heights instead accumulates a rounding error per level, which on a 50k-leaf
+// caterpillar is not small.
+function rounded(height: number) {
+  return Number(height.toFixed(PRECISION))
+}
+
 // Newick format: Olsen (1990) http://evolution.genetics.washington.edu/phylip/newicktree.html
-// Note: this library encodes internal node height as the label (e.g. "(A,B)1.2345"),
-// not as a branch length (":"). fromNewick handles both forms on input.
+//
+// A `ClusterNode` carries the absolute height its cluster merged at, and this
+// writes the differences between those heights as `:` branch lengths, which is
+// what every other reader of the format expects. Absolute heights survive it:
+// UPGMA is monotonic (`distance.c` clamps the float-rounding inversions), so a
+// node's height is the root's minus the lengths on the path down to it, and
+// `fromNewick` recovers them that way.
+//
+// Until v5 this wrote the height into the internal node's *label* instead
+// (`(A,B)1.2345`). Every mainstream viewer -- iTOL, FigTree, MEGA, RAxML,
+// IQ-TREE, MrBayes -- reads a numeric internal label as a bootstrap support
+// value, so those trees loaded as unlengthed cladograms carrying nonsense
+// support, and FigTree mapped the labels onto the wrong nodes when rerooting.
+// Nothing warned: the string parsed fine everywhere and drew the wrong picture.
 //
 // Names are quoted on the way out. `clusterObject` takes its labels from the
 // keys of the caller's data object, which are arbitrary strings from somebody's
@@ -86,10 +109,14 @@ export function toNewick(node: ClusterNode): string {
     }
   }
 
+  // A child's `:length` is written as it folds into its parent, which is the
+  // only point both heights are in hand. The root never folds into anything, so
+  // it alone carries no length -- correct, since there is no branch above it.
   const rendered = new Map<ClusterNode, string>()
   for (let i = order.length - 1; i >= 0; i--) {
     const n = order[i]!
     if (n.children?.length) {
+      const height = rounded(n.height)
       // drop each child's string as it is folded into the parent. Recursion
       // freed these as it unwound; holding the whole map to the end instead
       // means every intermediate subtree string is live at once, which for a
@@ -97,9 +124,9 @@ export function toNewick(node: ClusterNode): string {
       const parts = n.children.map(c => {
         const s = rendered.get(c)!
         rendered.delete(c)
-        return s
+        return `${s}:${(height - rounded(c.height)).toFixed(PRECISION)}`
       })
-      rendered.set(n, `(${parts.join(',')})${n.height.toFixed(4)}`)
+      rendered.set(n, `(${parts.join(',')})`)
     } else {
       rendered.set(n, quoteName(n.name))
     }
@@ -108,34 +135,76 @@ export function toNewick(node: ClusterNode): string {
 }
 
 /**
- * Read Newick into a `ClusterNode`.
+ * Read Newick into a `ClusterNode`, in either encoding of a node's height.
  *
- * `postParenNumeric: 'length'` because `toNewick` above writes an internal
- * node's merge height as its post-paren label rather than as a `:` branch
- * length, and that number is the whole point of a dendrogram. The parser's
- * default would only read it as a height while the tree carries no `:` anywhere,
- * which is true of what `toNewick` writes but not of a phylogeny somebody hands
- * us.
+ * What `toNewick` writes, and what a phylogeny carries, is a `:` branch length
+ * per node, so a height is the root's minus the lengths down to it. What
+ * `toNewick` wrote before v5 -- and what is still sitting in saved sessions --
+ * is the absolute height as the internal node's post-paren label, with no `:`
+ * anywhere in the string.
+ *
+ * Reading `postParenNumeric: 'name'` first is what tells the two apart, because
+ * under it a `length` can only have come from a `:` token: none anywhere means
+ * the string carries no branch lengths, so any post-paren numbers on it are the
+ * old form's heights and a second pass reads them as such. Detecting on which
+ * nodes carry a length instead would misread `((A,B)E:0.5,C);` -- a phylogeny
+ * whose leaves happen to have no lengths of their own.
  */
 export function fromNewick(s: string): ClusterNode {
-  const parsed = parseNewick(s, { postParenNumeric: 'length' })
-  const asCluster = (n: NewickNode): ClusterNode => ({
-    name: n.name ?? '',
-    height: n.length ?? 0,
-  })
+  const parsed = parseNewick(s, { postParenNumeric: 'name' })
+  const root: ClusterNode = { name: parsed.name ?? '', height: 0 }
 
-  // iterative, like the parser it calls: a single-linkage dendrogram chains, so
-  // this tree can be nearly as deep as it has leaves
-  const root = asCluster(parsed)
+  // iterative, like the parser it calls: a UPGMA dendrogram chains, so this tree
+  // can be nearly as deep as it has leaves
+  const pairs: { source: NewickNode; target: ClusterNode }[] = []
   const stack = [{ source: parsed, target: root }]
   while (stack.length > 0) {
-    const { source, target } = stack.pop()!
+    const pair = stack.pop()!
+    pairs.push(pair)
+    const { source, target } = pair
     if (source.children) {
-      target.children = source.children.map(asCluster)
+      target.children = source.children.map(n => ({
+        name: n.name ?? '',
+        height: 0,
+      }))
       for (const [i, child] of source.children.entries()) {
         stack.push({ source: child, target: target.children[i]! })
       }
     }
+  }
+
+  if (!pairs.some(p => p.source.length !== undefined)) {
+    // no `:` anywhere, so re-read with the post-paren numbers as the heights
+    // they are in the pre-v5 form. Names are taken from this pass too: in the
+    // one above the same token parsed as the node's name, and leaving it there
+    // would report every internal node as named for its own height.
+    const legacy = parseNewick(s, { postParenNumeric: 'length' })
+    const stack = [{ source: legacy, target: root }]
+    while (stack.length > 0) {
+      const { source, target } = stack.pop()!
+      target.name = source.name ?? ''
+      target.height = source.length ?? 0
+      for (const [i, child] of source.children?.entries() ?? []) {
+        stack.push({ source: child, target: target.children![i]! })
+      }
+    }
+    return root
+  }
+
+  // Depth from the root, then heights measured back from the deepest leaf. Every
+  // leaf of an ultrametric dendrogram sits at the same depth, so the max is the
+  // root's height; taking the max rather than any one leaf also gives a sane
+  // answer for a phylogeny, whose leaves are ragged.
+  const depth = new Map<ClusterNode, number>([[root, parsed.length ?? 0]])
+  for (const { source, target } of pairs) {
+    const own = depth.get(target)!
+    for (const [i, child] of source.children?.entries() ?? []) {
+      depth.set(target.children![i]!, own + (child.length ?? 0))
+    }
+  }
+  const deepest = Math.max(...depth.values())
+  for (const [node, d] of depth) {
+    node.height = deepest - d
   }
   return root
 }

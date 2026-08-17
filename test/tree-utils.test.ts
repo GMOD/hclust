@@ -96,7 +96,7 @@ describe('tree-utils', () => {
       }
 
       const newick = toNewick(node)
-      expect(newick).toBe('(Sample 0,Sample 1)1.5000')
+      expect(newick).toBe('(Sample 0:1.5000,Sample 1:1.5000)')
     })
 
     it('should convert a nested tree to Newick format', () => {
@@ -117,7 +117,7 @@ describe('tree-utils', () => {
       }
 
       const newick = toNewick(node)
-      expect(newick).toBe('((A,B)1.0000,C)2.0000')
+      expect(newick).toBe('((A:1.0000,B:1.0000):1.0000,C:2.0000)')
     })
 
     it('should handle multiple levels of nesting', () => {
@@ -145,7 +145,9 @@ describe('tree-utils', () => {
       }
 
       const newick = toNewick(node)
-      expect(newick).toBe('(((A,B)1.0000,C)2.0000,D)3.0000')
+      expect(newick).toBe(
+        '(((A:1.0000,B:1.0000):1.0000,C:2.0000):1.0000,D:3.0000)',
+      )
     })
 
     it('should format height to 4 decimal places', () => {
@@ -159,7 +161,7 @@ describe('tree-utils', () => {
       }
 
       const newick = toNewick(node)
-      expect(newick).toBe('(A,B)1.2346')
+      expect(newick).toBe('(A:1.2346,B:1.2346)')
     })
   })
 
@@ -181,11 +183,12 @@ describe('tree-utils', () => {
       expect(tree.children?.[1]).toEqual({ name: 'B', height: 0 })
     })
 
-    it('should parse branch lengths', () => {
+    it('reads branch lengths as heights back from the deepest leaf', () => {
       const newick = '(A:0.1,B:0.2);'
       const tree = fromNewick(newick)
-      expect(tree.children?.[0]?.height).toBe(0.1)
-      expect(tree.children?.[1]?.height).toBe(0.2)
+      expect(tree.height).toBe(0.2)
+      expect(tree.children?.[0]?.height).toBeCloseTo(0.1)
+      expect(tree.children?.[1]?.height).toBe(0)
     })
 
     it('should parse nested structure', () => {
@@ -198,11 +201,14 @@ describe('tree-utils', () => {
       expect(tree.children?.[1]?.name).toBe('C')
     })
 
-    it('should parse internal node names and heights', () => {
+    it('should parse internal node names', () => {
+      // a phylogeny, not a dendrogram: `:` present, so the heights come back
+      // from the deepest leaf even though no leaf carries a length of its own
       const newick = '((A,B)E:0.5,C);'
       const tree = fromNewick(newick)
       expect(tree.children?.[0]?.name).toBe('E')
-      expect(tree.children?.[0]?.height).toBe(0.5)
+      expect(tree.height).toBe(0.5)
+      expect(tree.children?.[0]?.height).toBe(0)
     })
 
     it('should round-trip with toNewick preserving heights', () => {
@@ -239,22 +245,96 @@ describe('tree-utils', () => {
     })
 
     it('should handle complex Wikipedia example', () => {
+      // D is the deepest tip at 0.5 + 0.4, so that is the root's height and
+      // every other node's is what remains of it below them
       const newick = '(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;'
       const tree = fromNewick(newick)
       expect(tree.name).toBe('F')
+      expect(tree.height).toBeCloseTo(0.9)
       expect(tree.children).toHaveLength(3)
-      expect(tree.children?.[0]).toEqual({ name: 'A', height: 0.1 })
-      expect(tree.children?.[1]).toEqual({ name: 'B', height: 0.2 })
+      expect(tree.children?.[0]?.height).toBeCloseTo(0.8)
+      expect(tree.children?.[1]?.height).toBeCloseTo(0.7)
       expect(tree.children?.[2]?.name).toBe('E')
-      expect(tree.children?.[2]?.height).toBe(0.5)
-      expect(tree.children?.[2]?.children?.[0]).toEqual({
-        name: 'C',
-        height: 0.3,
+      expect(tree.children?.[2]?.height).toBeCloseTo(0.4)
+      expect(tree.children?.[2]?.children?.[0]?.height).toBeCloseTo(0.1)
+      expect(tree.children?.[2]?.children?.[1]?.height).toBe(0)
+    })
+  })
+
+  describe('the pre-v5 label form', () => {
+    // toNewick wrote the merge height as the internal node's label until v5.
+    // Saved sessions and stored trees still hold those strings.
+    it('reads a height written as a post-paren label', () => {
+      const tree = fromNewick('((A,B)1.0000,C)2.0000')
+      expect(tree.height).toBeCloseTo(2)
+      expect(tree.children?.[0]?.height).toBeCloseTo(1)
+      expect(tree.children?.[0]?.children?.[0]).toEqual({
+        name: 'A',
+        height: 0,
       })
-      expect(tree.children?.[2]?.children?.[1]).toEqual({
-        name: 'D',
-        height: 0.4,
+      expect(tree.children?.[1]).toEqual({ name: 'C', height: 0 })
+    })
+
+    it('gives both forms of the same tree the same heights', () => {
+      const legacy = fromNewick('((A,B)1.0000,C)2.0000')
+      const current = fromNewick('((A:1.0000,B:1.0000):1.0000,C:2.0000)')
+      expect(current).toEqual(legacy)
+    })
+
+    it('leaves a phylogeny bootstrap value as a name, not a height', () => {
+      // `:` present, so 95 and 80 stay names and the clades take their heights
+      // from the branch lengths below them
+      const tree = fromNewick('((A:1,B:1)95,(C:1,D:1)80);')
+      expect(tree.children?.[0]?.name).toBe('95')
+      expect(tree.children?.[0]?.height).toBe(1)
+      expect(tree.children?.[0]?.children?.[0]?.height).toBe(0)
+    })
+  })
+
+  describe('branch lengths', () => {
+    it('writes what every other newick reader expects', () => {
+      // a numeric internal *label* is a bootstrap support value to iTOL,
+      // FigTree, MEGA and RAxML, so heights must travel as `:` lengths
+      const newick = toNewick({
+        name: '',
+        height: 2,
+        children: [
+          {
+            name: '',
+            height: 1,
+            children: [
+              { name: 'A', height: 0 },
+              { name: 'B', height: 0 },
+            ],
+          },
+          { name: 'C', height: 0 },
+        ],
       })
+      expect(newick).toBe('((A:1.0000,B:1.0000):1.0000,C:2.0000)')
+      expect(newick).not.toMatch(/\)\d/)
+    })
+
+    it('does not drift over a deep tree', () => {
+      // lengths are differences of rounded heights, so they telescope exactly.
+      // Differencing the raw heights instead loses a rounding error per level,
+      // which over thousands of levels is not small.
+      let node: ClusterNode = { name: 'leaf', height: 0 }
+      for (let i = 1; i <= 2000; i++) {
+        node = {
+          name: '',
+          height: i / 3,
+          children: [node, { name: `S${i}`, height: 0 }],
+        }
+      }
+      const round = fromNewick(toNewick(node))
+      expect(round.height).toBeCloseTo(2000 / 3, 4)
+
+      let deepest = round
+      while (deepest.children) {
+        deepest = deepest.children[0]!
+      }
+      expect(deepest.name).toBe('leaf')
+      expect(deepest.height).toBe(0)
     })
   })
 
@@ -431,7 +511,7 @@ describe('tree-utils', () => {
           { name: 'Sample 1', height: 0 },
         ],
       })
-      expect(newick).toBe('(Sample 0,Sample 1)1.5000')
+      expect(newick).toBe('(Sample 0:1.5000,Sample 1:1.5000)')
       expect(roundTrip(['Sample 0', 'Sample 1'])).toEqual([
         'Sample 0',
         'Sample 1',
