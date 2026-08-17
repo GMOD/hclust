@@ -1,3 +1,9 @@
+## [5.0.0](https://github.com/GMOD/hclust/compare/v4.1.1...v5.0.0) (2026-08-17)
+
+### Features
+
+- **BREAKING** Write merge heights as `:` branch lengths ([f0cbcf6](https://github.com/GMOD/hclust/commit/f0cbcf69c778bbbe92f0516974a4a80c0da71f86))
+
 ## [4.1.1](https://github.com/GMOD/hclust/compare/v4.1.0...v4.1.1) (2026-08-16)
 
 ### Documentation
