@@ -5,3 +5,4 @@ esm
 .eslintcache
 .claude/settings.local.json
 .claude/worktrees/
+build

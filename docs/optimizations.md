@@ -183,24 +183,33 @@ stays on the table.
 
 ## Methodology
 
+Both tables regenerate:
+
+```
+pnpm bench:generations   # the three C generations
+pnpm bench:greenelab     # greenelab vs the shipped wasm
+```
+
 Data is `data[i][j] = sin(i·31 + j·7) × 100` with `V = 20`, generated
-identically in C and JS.
+identically in C and JS. Pass sizes as arguments to either script; the defaults
+are the rows above, and greenelab takes about 100 seconds to get through them.
 
-The three C generations build from their committed sources —
-`git show <ref>:src/wasm/distance.c` — with `gcc -O2` and a stub `emscripten.h`,
-renaming each generation's two exported symbols so all three link into one
-harness and run against the same buffers in the same process. Best of 3 runs per
-cell, on a machine held on AC power: CPU scaling made the first attempt
-non-monotonic in N.
+`bench:generations` compiles each generation from the commit that introduced it
+(`25fb205`, `c896acb`, `e6ed69e`) with `cc -O2` and a stub `emscripten.h`,
+renaming its two exported symbols so all three link into one harness and run
+against the same buffers in the same process. Best of 3 per cell — run it on AC
+power, since CPU scaling made the first attempt at these numbers non-monotonic
+in N.
 
-The greenelab figures call `@greenelab/hclust@0.0.1` from npm under Node 24 with
-its progress callback stubbed out. Those are single runs, and JS-vs-native is
-not like-for-like — which is why the "current" column beside it goes through
-WebAssembly. Treat the last table as order-of-magnitude.
+`bench:greenelab` installs `@greenelab/hclust@0.0.1` into a gitignored `build/`
+and calls it with its progress callback stubbed out. Those are single runs, and
+JS-vs-native is not like-for-like — which is why the column beside it goes
+through WebAssembly rather than the C harness. Treat that table as
+order-of-magnitude.
 
-Re-running all of it on different hardware (Aug 2026) reproduced the ratios and
-the scaling, with absolute times 1.3–1.5× lower throughout. The milliseconds
-belong to the machine; the ratios are the claim.
+Absolute milliseconds belong to the machine: a re-run on different hardware
+(Aug 2026) reproduced every ratio and the scaling with times 1.3–1.5× lower
+throughout. The ratios are the claim.
 
 Generations 2 and 4 got an equivalence check: 28 datasets spanning continuous,
 integer, all-zero and sparse-duplicate input, compared merge-for-merge and

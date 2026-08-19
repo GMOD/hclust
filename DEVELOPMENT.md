@@ -139,3 +139,17 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test --run && pnpm buil
 Some tests compare against fixtures captured from v3.0.4. If the output format
 changes deliberately, regenerate them — `scripts/regen-v304-snapshots.ts`
 carries the three commands at the top of the file.
+
+## Benchmarking
+
+```bash
+# Current build, callback and tied-input regimes included
+pnpm bench
+
+# The tables in docs/optimizations.md, both of which regenerate
+pnpm bench:generations   # three C generations, compiled from their commits
+pnpm bench:greenelab     # the original JS implementation vs the shipped wasm
+```
+
+`bench:generations` needs a host `cc`, not emscripten. `bench:greenelab`
+installs its baseline into a gitignored `build/` on first run.

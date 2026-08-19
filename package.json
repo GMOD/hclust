@@ -36,6 +36,8 @@
   "scripts": {
     "test": "vitest",
     "bench": "vitest bench",
+    "bench:generations": "bash scripts/bench-generations.sh",
+    "bench:greenelab": "node scripts/bench-vs-greenelab.mjs",
     "lint": "eslint --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.lint.json",
     "clean": "rimraf dist esm",
