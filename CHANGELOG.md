@@ -1,3 +1,20 @@
+## [5.1.0](https://github.com/GMOD/hclust/compare/v5.0.0...v5.1.0) (2026-08-24)
+
+### Documentation
+
+- Add speedup factors to the optimization history, and tighten it ([5db183e](https://github.com/GMOD/hclust/commit/5db183e1218d447a91410224b753fa70706999a5))
+
+### Other Changes
+
+- Make both optimization-history tables regenerable ([673f6c4](https://github.com/GMOD/hclust/commit/673f6c40aab737a54de674019d8ffe17e973f37e))
+- Cluster real genotypes at JBrowse's widths, first call included ([7287229](https://github.com/GMOD/hclust/commit/72872293b51d321bcf9fc5ff3b6a674780272b0f))
+- Let bench:real dump its matrices so another distance build can be timed on them ([42987db](https://github.com/GMOD/hclust/commit/42987db7a60a5a8c4de2c863888a2871c1db0d1a))
+
+### Performance Improvements
+
+- Do the distance build in a per-row function so V8 tiers it up ([b5138b8](https://github.com/GMOD/hclust/commit/b5138b89fce3469a9cae2dde4596fa9cb460958d))
+- F32x4 differences and squares, f64x2 accumulation every 16 elements ([a18f9f6](https://github.com/GMOD/hclust/commit/a18f9f608ecd9620b6637375f6e023ff63c34895))
+
 ## [5.0.0](https://github.com/GMOD/hclust/compare/v4.1.1...v5.0.0) (2026-08-17)
 
 ### Features
