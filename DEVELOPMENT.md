@@ -149,7 +149,13 @@ pnpm bench
 # The tables in docs/optimizations.md, both of which regenerate
 pnpm bench:generations   # three C generations, compiled from their commits
 pnpm bench:greenelab     # the original JS implementation vs the shipped wasm
+
+# Real genotypes at JBrowse's widths, each case in a fresh process so the
+# first call is measured separately from a warm one
+pnpm bench:real [vcf.gz]
 ```
 
 `bench:generations` needs a host `cc`, not emscripten. `bench:greenelab`
-installs its baseline into a gitignored `build/` on first run.
+installs its baseline into a gitignored `build/` on first run. `bench:real`
+reads the bundled 1000 Genomes slice in `benchmarks/data/` (2504 samples, 1 Mb
+of chr22) with no tools beyond node, and takes a couple of minutes.

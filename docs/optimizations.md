@@ -1,8 +1,9 @@
 # How this got fast
 
 Clustering 2,000 samples took 71 seconds when JBrowse first shipped it and takes
-0.16 seconds now — **446× faster**. This is what changed, in order. Every number
-is measured; see [Methodology](#methodology).
+0.1 seconds now — **446× faster** as of step 5, and the kernel has moved since.
+This is what changed, in order. Every number is measured; see
+[Methodology](#methodology).
 
 ## Where it started: greenelab/hclust
 
@@ -125,6 +126,48 @@ A benchmark that omits an optional argument is not benchmarking the caller's
 configuration. `benchmarks/cluster.bench.ts` now runs both paths, so the next
 divergence shows up as a number rather than a bug report.
 
+## 6. Real widths, and the first call
+
+_Aug 2026._ Everything above was measured at V = 20 columns, where the merge
+loop is the cost. JBrowse hands over one column per variant site in the window,
+which on a 1000 Genomes window at the default filters is 2,000 to 22,000
+columns; there the distance build is 97 to 100% of the run and the merge loop is
+~40 ms. `pnpm bench:real` runs that regime on a bundled slice of real genotypes
+(`benchmarks/data/`), each case in a fresh process.
+
+The fresh process is the point. The first `clusterData` call in a process ran
+the distance build at 1.05 G pair-elements/s and every later one at 1.95; node
+`--no-liftoff` closed the gap. V8 promotes a wasm function out of its Liftoff
+baseline tier on call count and has no on-stack replacement, and
+`hierarchicalCluster` did the whole build in one call, so the first call stayed
+baseline to the end. A best-of-N benchmark in one process is exactly the
+configuration that hides this, the same way omitting the callback hid step 5.
+Chrome tiers the same way, and the first clustering in a JBrowse worker is the
+one the user is waiting on.
+
+The per-row work moved into its own function, `distanceRowChunk`, called once
+per 256 pairs. Call count promotes it a few thousand calls in, and the outer
+loop that stays baseline does nothing but count. **First call at 2504 × 3106:
+13.0s → 7.1s**, warm unchanged (a cache-blocked variant was tried first and cost
+15% warm: with a 96 KB block both operands come out of L2 instead of one from L1
+and one streaming, and the kernel was not memory-bound anyway).
+
+## 7. f32x4 differences, f64x2 sums
+
+_Aug 2026._ The kernel promoted every element to double before the subtract, so
+it ran at `f64x2` width: two elements per operation. Now the subtract and square
+are `f32x4` and the promotion to `f64x2` happens every 16 elements, after a
+pairwise add of four vectors, so a float lane never sums more than four
+non-negative terms before reaching the double accumulator. That bounds the
+relative error at a few float ulps independent of V, which is what step 3 was
+protecting against: a plain float32 sum's error grows with the vector length,
+and this one does not. On every real matrix checked, merges, heights and leaf
+order are bit-identical to the all-double kernel, and the v3.0.4 snapshots pass
+unchanged.
+
+**2504 × 3106: 7.0s → 2.8s (2.5×)**; 1.45 → 3.5 G pair-elements/s. The V = 20
+regime moved from 152 to ~100 ms at N = 2000, most of it the same kernel.
+
 ## Results
 
 Three C generations, same data, same binary, best of 3 runs (ms):
@@ -152,6 +195,25 @@ native):
 | 1500 |         28,331 |           53 |    535× |
 | 2000 |         71,365 |          160 |    446× |
 
+Real genotypes at JBrowse's widths, `pnpm bench:real`, before and after steps 6
+and 7, on the same machine in one sitting (ms → s):
+
+| Case                              | N × V        |                     5.0.0 |              after 6 + 7 |           speedup |
+| --------------------------------- | ------------ | ------------------------: | -----------------------: | ----------------: |
+| 100 kb window, MAF 0, samples     | 2504 × 3106  | 5.0 s (first call 12.6 s) | 2.7 s (first call 2.8 s) | 1.9× (4.5× first) |
+| 1 Mb window, MAF 0.05, samples    | 2504 × 2357  |                     4.5 s |                    2.1 s |              2.1× |
+| 1 Mb window, MAF 0.05, haplotypes | 5008 × 2311  |                    16.8 s |                    9.3 s |              1.8× |
+| 1 Mb window, MAF 0, samples       | 2504 × 22514 |                    38.3 s |                   23.0 s |              1.7× |
+| 1 Mb window, MAF 0, haplotypes    | 5008 × 22383 |                   156.9 s |                   98.0 s |              1.6× |
+
+The 5.0.0 column is warm calls; the after column is `bench:real` itself, whose
+first-call and warm numbers now agree to within 5%. Absolute times are one
+i9-9980HK laptop, single threaded, and the rows drift with thermal state (the
+2.5× in step 7 was an A/B in one sitting; across sittings the same cases spread
+1.6 to 2.1×). Rerun `pnpm bench:real` on an idle machine before quoting a
+number: a run taken while other work shared the CPU came out 2 to 3× slower
+across the board and was discarded.
+
 ## What still costs
 
 **Tied input gets much less of this.** Cached-neighbour invalidation is the weak
@@ -168,18 +230,16 @@ used to claim. Storing only the upper triangle would halve the matrix and
 roughly double that ceiling, at the cost of a strided access — the merge loop
 reads both `[i][j]` and the mirrored `[j][i]`.
 
-**The distance matrix build is ~40% of the run** (828ms of 2.3s at N=10,000),
-and now that the merge loop is quadratic too, that share stays roughly constant
-with N.
-
-It is already vectorised: `scripts/build_wasm.sh` has carried `-msimd128` all
-along, and disassembly shows the kernel as `v128.load64_zero` →
-`f64x2.promote_low_f32x4` → `f64x2.sub` → `f64x2.mul` → `f64x2.add`. Note the
-width — `f64x2` is **two** elements per operation, not four, because the
-accumulator is `double`. `f32x4` would double the kernel's throughput for about
-20% off the total, and would give back exactly the numerical stability step 3
-bought. Bad trade for a library whose output people publish, so this headroom
-stays on the table.
+**The distance matrix build is the run at real widths.** At V = 20 it was ~40%
+(828ms of 2.3s at N=10,000); at the thousands of columns JBrowse hands over it
+is 97 to 100%, and step 7's kernel is the state of that: `f32x4` subtract and
+square, `f64x2` accumulate every 16 elements, ~3.5 G pair-elements/s single
+threaded. What is left is memory-level parallelism and the GPU. A compute shader
+doing the same Euclidean build, one thread per pair with no tiling, ran 6 to 12×
+faster than the step 7 kernel (12 to 19× faster than 5.0.0) on the bundled 1000
+Genomes matrices (measured in jbrowse-components,
+`browser-tests/probe-gpu-distance-matrix.ts`), which is the argument for a
+`clusterData` entry that accepts a precomputed distance matrix.
 
 ## Methodology
 
@@ -193,6 +253,12 @@ pnpm bench:greenelab     # greenelab vs the shipped wasm
 Data is `data[i][j] = sin(i·31 + j·7) × 100` with `V = 20`, generated
 identically in C and JS. Pass sizes as arguments to either script; the defaults
 are the rows above, and greenelab takes about 100 seconds to get through them.
+
+`bench:real` parses the bundled VCF with node alone, builds matrices the way
+`plugins/variants` in jbrowse-components does (one column per ALT allele, dosage
+scaled to 2/called, no-calls imputed to the site mean, one 0/1 row per haplotype
+in phased mode), and spawns a child process per case so the first call is a real
+first call.
 
 `bench:generations` compiles each generation from the commit that introduced it
 (`25fb205`, `c896acb`, `e6ed69e`) with `cc -O2` and a stub `emscripten.h`,

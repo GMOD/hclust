@@ -11,6 +11,13 @@
 // makes duplicate-heavy input a different performance regime from continuous
 // input, and only one of the two is exercised by random data.
 //
+// The wide case is the third regime, and the one JBrowse's variant clustering
+// actually runs in: one column per site in the window, thousands wide, where
+// the distance build is nearly the whole run and the merge loop is noise. It
+// went unmeasured through the first five optimizations because every case
+// here was V = 20. `pnpm bench:real` runs the same regime on real genotypes,
+// first call included.
+//
 // Run with `pnpm bench`.
 import { bench, describe } from 'vitest'
 
@@ -75,6 +82,34 @@ for (const n of [500, 1500]) {
     )
   })
 }
+
+// 0/1/2 dosages at a per-site allele frequency: what a diploid panel with no
+// missing calls hands over.
+function genotypes(n: number, v: number) {
+  let s = 7
+  const rnd = () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return s / 2 ** 32
+  }
+  const freqs = Float32Array.from({ length: v }, () => 0.05 + rnd() * 0.45)
+  return Array.from({ length: n }, () =>
+    Float32Array.from({ length: v }, (_, j) => {
+      const p = freqs[j]!
+      return (rnd() < p ? 1 : 0) + (rnd() < p ? 1 : 0)
+    }),
+  )
+}
+
+describe('wide n=500 v=3000', () => {
+  const data = genotypes(500, 3000)
+  bench(
+    'onProgress',
+    async () => {
+      await clusterData({ data, onProgress: () => {} })
+    },
+    opts,
+  )
+})
 
 // clustersGivenK is a lazy getter and costs O(n^2) to build (d51749e). Callers
 // that only want the tree never pay it; this is what they would pay if they
