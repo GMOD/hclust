@@ -28,6 +28,7 @@
 #include <string.h>
 #include <limits.h>
 #include <emscripten.h>
+#include <wasm_simd128.h>
 
 typedef int (*ProgressCallback)(int iteration, int totalIterations);
 
@@ -38,31 +39,35 @@ void setProgressCallback(ProgressCallback callback) {
   g_progressCallback = callback;
 }
 
-// Squared sum is accumulated in double to avoid catastrophic cancellation on
-// long vectors — float32 only holds ~7 decimal digits, so a 10k-dimensional
-// sum loses meaningful precision. Four parallel partials give the optimizer
-// room to vectorize without breaking strict-FP associativity.
+// Differences and squares in f32x4, promoted and accumulated in f64x2 every
+// 16 elements, so a float lane never sums more than four non-negative terms
+// before reaching the double accumulator. That bounds the relative error at a
+// few float ulps independent of vector length, where a plain float32 sum grows
+// with it; the previous all-double kernel ran at half the throughput.
 static float euclideanDistance(
   const float* __restrict__ a,
   const float* __restrict__ b,
   int size
 ) {
-  double s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0;
+  v128_t acc0 = wasm_f64x2_splat(0.0);
+  v128_t acc1 = wasm_f64x2_splat(0.0);
   int i = 0;
-  for (; i + 3 < size; i += 4) {
-    double d0 = (double)a[i]   - (double)b[i];
-    double d1 = (double)a[i+1] - (double)b[i+1];
-    double d2 = (double)a[i+2] - (double)b[i+2];
-    double d3 = (double)a[i+3] - (double)b[i+3];
-    s0 += d0 * d0;
-    s1 += d1 * d1;
-    s2 += d2 * d2;
-    s3 += d3 * d3;
+  for (; i + 15 < size; i += 16) {
+    v128_t d0 = wasm_f32x4_sub(wasm_v128_load(a + i), wasm_v128_load(b + i));
+    v128_t d1 = wasm_f32x4_sub(wasm_v128_load(a + i + 4), wasm_v128_load(b + i + 4));
+    v128_t d2 = wasm_f32x4_sub(wasm_v128_load(a + i + 8), wasm_v128_load(b + i + 8));
+    v128_t d3 = wasm_f32x4_sub(wasm_v128_load(a + i + 12), wasm_v128_load(b + i + 12));
+    v128_t s = wasm_f32x4_add(
+      wasm_f32x4_add(wasm_f32x4_mul(d0, d0), wasm_f32x4_mul(d1, d1)),
+      wasm_f32x4_add(wasm_f32x4_mul(d2, d2), wasm_f32x4_mul(d3, d3)));
+    acc0 = wasm_f64x2_add(acc0, wasm_f64x2_promote_low_f32x4(s));
+    acc1 = wasm_f64x2_add(acc1, wasm_f64x2_promote_low_f32x4(wasm_i32x4_shuffle(s, s, 2, 3, 2, 3)));
   }
-  double sum = (s0 + s1) + (s2 + s3);
+  double sum = wasm_f64x2_extract_lane(acc0, 0) + wasm_f64x2_extract_lane(acc0, 1)
+             + wasm_f64x2_extract_lane(acc1, 0) + wasm_f64x2_extract_lane(acc1, 1);
   for (; i < size; i++) {
-    double d = (double)a[i] - (double)b[i];
-    sum += d * d;
+    float d = a[i] - b[i];
+    sum += (double)(d * d);
   }
   return (float)sqrt(sum);
 }
