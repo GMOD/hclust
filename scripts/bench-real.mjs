@@ -15,9 +15,14 @@
 // allele, dosage scaled to 2/called, a no-call as NaN imputed to the site
 // mean; phased mode is one 0/1 row per haplotype.
 //
-// Usage: pnpm bench:real [vcf.gz]
+// Usage: pnpm bench:real [vcf.gz] [--dump=<dir>]
+//
+// --dump writes each case's matrix to <dir>/<case>.bin (uint32 rows, uint32
+// columns, then float32 row-major) so another implementation of the distance
+// build can be timed on the identical input; jbrowse-components'
+// probe-gpu-distance-matrix.ts reads that layout.
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
@@ -26,6 +31,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const vcf =
   process.argv.find((a, i) => i >= 2 && !a.startsWith('--')) ??
   join(root, 'benchmarks/data/1kg_chr22_20-21Mb.vcf.gz')
+
+const dumpArg = process.argv.find(a => a.startsWith('--dump='))
+const dumpDir = dumpArg?.slice('--dump='.length)
 
 const cases = [
   {
@@ -194,6 +202,22 @@ if (caseArg) {
     c,
     readSites(gunzipSync(readFileSync(vcf)).toString()),
   )
+  if (dumpDir) {
+    mkdirSync(dumpDir, { recursive: true })
+    const cols = data[0].length
+    const out = new Float32Array(data.length * cols)
+    data.forEach((row, r) => out.set(row, r * cols))
+    writeFileSync(
+      join(
+        dumpDir,
+        `${c.label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.bin`,
+      ),
+      Buffer.concat([
+        Buffer.from(new Uint32Array([data.length, cols]).buffer),
+        Buffer.from(out.buffer),
+      ]),
+    )
+  }
   const first = await timed(data)
   const warm = await timed(data)
   console.log(
@@ -205,7 +229,12 @@ if (caseArg) {
   cases.forEach((_, i) => {
     execFileSync(
       process.execPath,
-      [fileURLToPath(import.meta.url), vcf, `--case=${i}`],
+      [
+        fileURLToPath(import.meta.url),
+        vcf,
+        `--case=${i}`,
+        ...(dumpDir ? [`--dump=${dumpDir}`] : []),
+      ],
       {
         stdio: 'inherit',
         maxBuffer: 1 << 30,
