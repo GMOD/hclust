@@ -67,6 +67,24 @@ static float euclideanDistance(
   return (float)sqrt(sum);
 }
 
+// Distances from row i to rows j0..jEnd-1, written to both triangles. A
+// separate function on purpose: V8 promotes a wasm function from its baseline
+// tier on call count, without on-stack replacement, so one long call that did
+// all the work stayed baseline to the end and the first clustering in a fresh
+// worker ran at half speed.
+__attribute__((noinline))
+static void distanceRowChunk(
+  const float* data, int vectorSize, int numSamples,
+  int i, int j0, int jEnd, float* distances
+) {
+  const float* vecA = data + (size_t)i * vectorSize;
+  for (int j = j0; j < jEnd; j++) {
+    float d = euclideanDistance(vecA, data + (size_t)j * vectorSize, vectorSize);
+    distances[(size_t)i * numSamples + j] = d;
+    distances[(size_t)j * numSamples + i] = d;
+  }
+}
+
 // Nearest active neighbour of slot i, by (distance, cluster size, slot id).
 //
 // The slot id is the last resort and exists to make the choice canonical.
@@ -149,17 +167,15 @@ int hierarchicalCluster(
   const int clockPollInterval = 1024;
   int sinceClockPoll = 0;
 
+  const int chunkPairs = 256;
   for (int i = 0; i < numSamples; i++) {
-    float* row = distances + (size_t)i * numSamples;
-    row[i] = 0.0f;
-    const float* vecA = data + (size_t)i * vectorSize;
-    for (int j = i + 1; j < numSamples; j++) {
-      float d = euclideanDistance(vecA, data + (size_t)j * vectorSize, vectorSize);
-      row[j] = d;
-      distances[(size_t)j * numSamples + i] = d;
-      distCalcsDone += 2;
+    distances[(size_t)i * numSamples + i] = 0.0f;
+    for (int j0 = i + 1; j0 < numSamples; j0 += chunkPairs) {
+      int jEnd = j0 + chunkPairs < numSamples ? j0 + chunkPairs : numSamples;
+      distanceRowChunk(data, vectorSize, numSamples, i, j0, jEnd, distances);
+      distCalcsDone += 2 * (jEnd - j0);
 
-      if (g_progressCallback && ++sinceClockPoll >= clockPollInterval) {
+      if (g_progressCallback && (sinceClockPoll += jEnd - j0) >= clockPollInterval) {
         sinceClockPoll = 0;
         double now = emscripten_get_now();
         if (now - lastProgressTime >= progressIntervalMs) {
