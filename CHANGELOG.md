@@ -1,3 +1,9 @@
+## [5.3.0](https://github.com/GMOD/hclust/compare/v5.2.0...v5.3.0) (2026-09-07)
+
+### Bug Fixes
+
+- Refuse what the 2GB heap cannot hold up front, and fill it row by row ([78e0da5](https://github.com/GMOD/hclust/commit/78e0da584ab7344209f5f0fd66e4c9b6300f2b76))
+
 ## [5.2.0](https://github.com/GMOD/hclust/compare/v5.1.0...v5.2.0) (2026-09-07)
 
 ### Documentation
