@@ -76,6 +76,24 @@ Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
 - No `NaN` or `Infinity`, or `clusterData` throws.
 - Without `sampleLabels`, leaves come back as `Sample 0`, `Sample 1`, …
 
+## Precomputed distances
+
+Pass `distances` instead of `data` to cluster a matrix built elsewhere — on a
+GPU, or under another metric:
+
+```typescript
+const result = await clusterData({
+  distances, // Float32Array, N×N row-major
+  sampleLabels,
+})
+```
+
+Only the upper triangle (column > row) is read, so a producer may leave the
+diagonal and the lower half unset. The run skips the distance phase and goes
+straight to the merge loop, so `onProgress` reports only `init` and
+`clustering`. A matrix that is not square, or holds a `NaN` or `Infinity`,
+throws.
+
 ## Other exports
 
 - `toNewick(node)` / `fromNewick(string)` — Newick serialization, writing merge

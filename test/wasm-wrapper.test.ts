@@ -6,6 +6,7 @@ const mockModule = {
   _malloc: vi.fn(),
   _free: vi.fn(),
   _hierarchicalCluster: vi.fn(),
+  _clusterDistanceMatrix: vi.fn(),
   _setProgressCallback: vi.fn(),
   addFunction: vi.fn(),
   removeFunction: vi.fn(),
@@ -31,6 +32,7 @@ describe('wasm-wrapper', () => {
     })
 
     mockModule._hierarchicalCluster.mockReturnValue(0)
+    mockModule._clusterDistanceMatrix.mockReturnValue(0)
 
     mockModule.addFunction.mockReturnValue(12345)
   })
@@ -101,6 +103,27 @@ describe('wasm-wrapper', () => {
       expect.any(Number),
       expect.any(Number),
     )
+  })
+
+  it('hands a distance matrix to clusterDistanceMatrix untouched', async () => {
+    mockModule.HEAPF32.fill(0)
+    mockModule.HEAP32.fill(0)
+    const distances = new Float32Array([0, 3, 0, 0])
+
+    await hierarchicalClusterWasm({ distances })
+
+    expect(mockModule._hierarchicalCluster).not.toHaveBeenCalled()
+    expect(mockModule._clusterDistanceMatrix).toHaveBeenCalledWith(
+      expect.any(Number),
+      2,
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+    )
+    const ptr = mockModule._clusterDistanceMatrix.mock.calls[0]![0] as number
+    expect(
+      Array.from(mockModule.HEAPF32.subarray(ptr / 4, ptr / 4 + 4)),
+    ).toEqual([0, 3, 0, 0])
   })
 
   it('should propagate error thrown by checkCancellation', async () => {

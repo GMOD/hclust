@@ -15,7 +15,7 @@ emcc distance.c \
   -msimd128 \
   -s WASM=1 \
   -s EXPORTED_RUNTIME_METHODS='["cwrap","ccall","getValue","setValue","HEAPF32","HEAP32","HEAPF64","addFunction","removeFunction"]' \
-  -s EXPORTED_FUNCTIONS='["_malloc","_free","_hierarchicalCluster","_setProgressCallback"]' \
+  -s EXPORTED_FUNCTIONS='["_malloc","_free","_hierarchicalCluster","_clusterDistanceMatrix","_setProgressCallback"]' \
   -s ALLOW_MEMORY_GROWTH=1 \
   -s INITIAL_MEMORY=64MB \
   -s MAXIMUM_MEMORY=2GB \

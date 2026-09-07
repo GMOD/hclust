@@ -7,6 +7,8 @@ export {
   treeToJSON,
 } from './tree-utils.ts'
 export type {
+  ClusterDataOptions,
+  ClusterDistancesOptions,
   ClusterNode,
   ClusterObjectOptions,
   ClusterOptions,

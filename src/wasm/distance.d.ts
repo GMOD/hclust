@@ -22,6 +22,13 @@ interface ClusteringModule {
     outMergeA: number,
     outMergeB: number,
   ) => number
+  _clusterDistanceMatrix: (
+    distancesPtr: number,
+    numSamples: number,
+    outHeights: number,
+    outMergeA: number,
+    outMergeB: number,
+  ) => number
   _setProgressCallback: (callbackPtr: number) => void
   addFunction: (fn: Function, signature: string) => number
   removeFunction: (ptr: number) => void

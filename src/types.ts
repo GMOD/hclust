@@ -29,12 +29,30 @@ export interface ClusterProgress {
   total: number
 }
 
-export interface ClusterOptions {
-  data: NumericVector[]
+interface ClusterCommonOptions {
   sampleLabels?: string[]
   onProgress?: (progress: ClusterProgress) => void
   checkCancellation?: () => void
 }
+
+export interface ClusterDataOptions extends ClusterCommonOptions {
+  /** One row per sample; the Euclidean distance between rows is clustered. */
+  data: NumericVector[]
+  distances?: undefined
+}
+
+export interface ClusterDistancesOptions extends ClusterCommonOptions {
+  data?: undefined
+  /**
+   * A precomputed N×N row-major distance matrix, any metric. Only the upper
+   * triangle (column > row) is read, so a producer may leave the rest unset.
+   * The run skips the distance phase, so `onProgress` sees only 'init' and
+   * 'clustering'.
+   */
+  distances: Float32Array
+}
+
+export type ClusterOptions = ClusterDataOptions | ClusterDistancesOptions
 
 export interface ClusterObjectOptions {
   data: Record<string, NumericVector>

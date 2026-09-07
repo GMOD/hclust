@@ -238,8 +238,10 @@ threaded. What is left is memory-level parallelism and the GPU. A compute shader
 doing the same Euclidean build, one thread per pair with no tiling, ran 6 to 12×
 faster than the step 7 kernel (12 to 19× faster than 5.0.0) on the bundled 1000
 Genomes matrices (measured in jbrowse-components,
-`browser-tests/probe-gpu-distance-matrix.ts`), which is the argument for a
-`clusterData` entry that accepts a precomputed distance matrix.
+`browser-tests/probe-gpu-distance-matrix.ts`). `clusterData({ distances })`
+takes that matrix and runs only the merge loop on it; the build here writes the
+upper triangle and the merge entry mirrors it, so a producer fills the same
+half.
 
 ## Methodology
 

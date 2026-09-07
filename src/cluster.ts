@@ -8,6 +8,7 @@ import type {
 
 export async function clusterData({
   data,
+  distances,
   sampleLabels,
   onProgress,
   checkCancellation,
@@ -21,6 +22,7 @@ export async function clusterData({
 
   const result = await hierarchicalClusterWasm({
     data,
+    distances,
     sampleLabels,
     statusCallback: onProgress,
     checkCancellation,
@@ -29,10 +31,10 @@ export async function clusterData({
   // Lazy because it is O(N^2): every one of the N levels snapshots the whole
   // partition, so it is ~9M index cells at N=3000 — dwarfing the tree itself,
   // and wasted on the many callers that only want `tree` and `order`.
-  // Bound to numSamples/merges rather than to `data` and `result`, so the
+  // Bound to numSamples/merges rather than to the input and `result`, so the
   // returned object doesn't pin the input matrix for its lifetime.
-  const numSamples = data.length
   const { merges } = result
+  const numSamples = merges.length + 1
   let cached: number[][][] | undefined
   return {
     tree: result.tree,

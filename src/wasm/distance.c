@@ -72,8 +72,8 @@ static float euclideanDistance(
   return (float)sqrt(sum);
 }
 
-// Distances from row i to rows j0..jEnd-1, written to both triangles. A
-// separate function on purpose: V8 promotes a wasm function from its baseline
+// Distances from row i to rows j0..jEnd-1, upper triangle only; the merge
+// loop mirrors it. A separate function on purpose: V8 promotes a wasm function from its baseline
 // tier on call count, without on-stack replacement, so one long call that did
 // all the work stayed baseline to the end and the first clustering in a fresh
 // worker ran at half speed.
@@ -84,9 +84,8 @@ static void distanceRowChunk(
 ) {
   const float* vecA = data + (size_t)i * vectorSize;
   for (int j = j0; j < jEnd; j++) {
-    float d = euclideanDistance(vecA, data + (size_t)j * vectorSize, vectorSize);
-    distances[(size_t)i * numSamples + j] = d;
-    distances[(size_t)j * numSamples + i] = d;
+    distances[(size_t)i * numSamples + j] =
+      euclideanDistance(vecA, data + (size_t)j * vectorSize, vectorSize);
   }
 }
 
@@ -121,21 +120,21 @@ static void findNearest(
   nn[i] = bestJ; nnDist[i] = bestDist; nnSize[i] = bestSize;
 }
 
-EMSCRIPTEN_KEEPALIVE
-int hierarchicalCluster(
-  const float* data,
+// The merge loop on an n×n matrix the caller owns. Only the upper triangle
+// (j > i) is read on entry — it is mirrored below, so a caller may fill just
+// that half — and the matrix is scratch afterwards: the Lance-Williams update
+// rewrites it in place.
+static int clusterDistances(
+  float* distances,
   int numSamples,
-  int vectorSize,
   float* outHeights,
   int* outMergeA,
   int* outMergeB
 ) {
   // -3 until proven otherwise: every allocation below jumps to cleanup on
   // failure, and reporting that as -1 told the caller its own cancellation had
-  // fired. The n x n matrix is 400MB at n=10,000, so this is a reachable
-  // outcome on real input, not a theoretical one.
+  // fired.
   int rc = -3;
-  float* distances  = NULL;
   int*   sizes      = NULL;
   int*   activeList = NULL;
   int*   activePos  = NULL;
@@ -144,53 +143,10 @@ int hierarchicalCluster(
   float* nnDist     = NULL;
   int*   nnSize     = NULL;
 
-  // --- Validate input: a single NaN/Inf would silently poison every distance
-  // (NaN compares false everywhere, so find-min would skip it and produce a
-  // wrong tree without an error). Cheap one-pass guard at entry.
-  {
-    size_t total = (size_t)numSamples * (size_t)vectorSize;
-    for (size_t i = 0; i < total; i++) {
-      if (!isfinite(data[i])) return -2;
-    }
-  }
-
-  // --- Distance matrix (full n×n, upper triangle computed, mirrored) ---
-  distances = (float*)malloc((size_t)numSamples * numSamples * sizeof(float));
-  if (!distances) goto cleanup;
-
-  double lastProgressTime = emscripten_get_now();
-  const double progressIntervalMs = 100.0;
-  int totalDistCalcs = numSamples * (numSamples - 1);
-  int distCalcsDone = 0;
-
-  // Reading the clock is a wasm->JS call (performance.now()), so doing it once
-  // per pair — as this used to — costs several times more than the distance it
-  // guards: with a callback registered, n=5000 went from 464ms to 1063ms to
-  // deliver nine progress reports. Sample it every 1024th pair instead. That is
-  // well under the 100ms report interval at any realistic vector width, so the
-  // cadence is unchanged and the check leaves the profile.
-  const int clockPollInterval = 1024;
-  int sinceClockPoll = 0;
-
-  const int chunkPairs = 256;
   for (int i = 0; i < numSamples; i++) {
     distances[(size_t)i * numSamples + i] = 0.0f;
-    for (int j0 = i + 1; j0 < numSamples; j0 += chunkPairs) {
-      int jEnd = j0 + chunkPairs < numSamples ? j0 + chunkPairs : numSamples;
-      distanceRowChunk(data, vectorSize, numSamples, i, j0, jEnd, distances);
-      distCalcsDone += 2 * (jEnd - j0);
-
-      if (g_progressCallback && (sinceClockPoll += jEnd - j0) >= clockPollInterval) {
-        sinceClockPoll = 0;
-        double now = emscripten_get_now();
-        if (now - lastProgressTime >= progressIntervalMs) {
-          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) {
-            rc = -1;
-            goto cleanup;
-          }
-          lastProgressTime = now;
-        }
-      }
+    for (int j = i + 1; j < numSamples; j++) {
+      distances[(size_t)j * numSamples + i] = distances[(size_t)i * numSamples + j];
     }
   }
 
@@ -236,7 +192,8 @@ int hierarchicalCluster(
   }
 
   int totalIterations = numSamples - 1;
-  lastProgressTime = emscripten_get_now();
+  const double progressIntervalMs = 100.0;
+  double lastProgressTime = emscripten_get_now();
 
   for (int iteration = 0; iteration < totalIterations; iteration++) {
     if (g_progressCallback) {
@@ -356,7 +313,6 @@ int hierarchicalCluster(
   rc = 0;
 
 cleanup:
-  free(distances);
   free(sizes);
   free(activeList);
   free(activePos);
@@ -364,5 +320,88 @@ cleanup:
   free(nn);
   free(nnDist);
   free(nnSize);
+  return rc;
+}
+
+// Clusters a precomputed n×n distance matrix — any metric, built anywhere
+// (a GPU, another library) — skipping the distance phase above. Same contract
+// as clusterDistances: the upper triangle is what is read, and the matrix is
+// scratch afterwards.
+EMSCRIPTEN_KEEPALIVE
+int clusterDistanceMatrix(
+  float* distances,
+  int numSamples,
+  float* outHeights,
+  int* outMergeA,
+  int* outMergeB
+) {
+  for (int i = 0; i < numSamples; i++) {
+    for (int j = i + 1; j < numSamples; j++) {
+      if (!isfinite(distances[(size_t)i * numSamples + j])) return -2;
+    }
+  }
+  return clusterDistances(distances, numSamples, outHeights, outMergeA, outMergeB);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int hierarchicalCluster(
+  const float* data,
+  int numSamples,
+  int vectorSize,
+  float* outHeights,
+  int* outMergeA,
+  int* outMergeB
+) {
+  // --- Validate input: a single NaN/Inf would silently poison every distance
+  // (NaN compares false everywhere, so find-min would skip it and produce a
+  // wrong tree without an error). Cheap one-pass guard at entry.
+  {
+    size_t total = (size_t)numSamples * (size_t)vectorSize;
+    for (size_t i = 0; i < total; i++) {
+      if (!isfinite(data[i])) return -2;
+    }
+  }
+
+  // --- Distance matrix (full n×n, upper triangle computed here) ---
+  float* distances = (float*)malloc((size_t)numSamples * numSamples * sizeof(float));
+  if (!distances) return -3;
+
+  double lastProgressTime = emscripten_get_now();
+  const double progressIntervalMs = 100.0;
+  int totalDistCalcs = numSamples * (numSamples - 1);
+  int distCalcsDone = 0;
+
+  // Reading the clock is a wasm->JS call (performance.now()), so doing it once
+  // per pair — as this used to — costs several times more than the distance it
+  // guards: with a callback registered, n=5000 went from 464ms to 1063ms to
+  // deliver nine progress reports. Sample it every 1024th pair instead. That is
+  // well under the 100ms report interval at any realistic vector width, so the
+  // cadence is unchanged and the check leaves the profile.
+  const int clockPollInterval = 1024;
+  int sinceClockPoll = 0;
+
+  const int chunkPairs = 256;
+  for (int i = 0; i < numSamples; i++) {
+    for (int j0 = i + 1; j0 < numSamples; j0 += chunkPairs) {
+      int jEnd = j0 + chunkPairs < numSamples ? j0 + chunkPairs : numSamples;
+      distanceRowChunk(data, vectorSize, numSamples, i, j0, jEnd, distances);
+      distCalcsDone += 2 * (jEnd - j0);
+
+      if (g_progressCallback && (sinceClockPoll += jEnd - j0) >= clockPollInterval) {
+        sinceClockPoll = 0;
+        double now = emscripten_get_now();
+        if (now - lastProgressTime >= progressIntervalMs) {
+          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) {
+            free(distances);
+            return -1;
+          }
+          lastProgressTime = now;
+        }
+      }
+    }
+  }
+
+  int rc = clusterDistances(distances, numSamples, outHeights, outMergeA, outMergeB);
+  free(distances);
   return rc;
 }

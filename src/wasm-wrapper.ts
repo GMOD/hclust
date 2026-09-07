@@ -24,7 +24,8 @@ export interface ClusteringResult {
 }
 
 export interface ClusteringOptions {
-  data: NumericVector[]
+  data?: NumericVector[]
+  distances?: Float32Array
   sampleLabels?: string[]
   statusCallback?: (progress: ClusterProgress) => void
   checkCancellation?: () => void
@@ -33,17 +34,12 @@ export interface ClusteringOptions {
 export async function hierarchicalClusterWasm(
   options: ClusteringOptions,
 ): Promise<ClusteringResult> {
-  const { data, sampleLabels, statusCallback, checkCancellation } = options
+  const { data, distances, sampleLabels, statusCallback, checkCancellation } =
+    options
   const module = await getModule()
-  const numSamples = data.length
+  const { numSamples, vectorSize, flatData } = flattenInput(data, distances)
   if (numSamples < 2) {
     throw new Error('clusterData requires at least 2 samples')
-  }
-  const vectorSize = data[0]?.length ?? 0
-
-  const flatData = new Float32Array(numSamples * vectorSize)
-  for (let i = 0; i < numSamples; i++) {
-    flatData.set(data[i]!, i * vectorSize)
   }
 
   const dataPtr = module._malloc(flatData.length * 4)
@@ -84,14 +80,22 @@ export async function hierarchicalClusterWasm(
       module._setProgressCallback(callbackPtr)
     }
 
-    const result = module._hierarchicalCluster(
-      dataPtr,
-      numSamples,
-      vectorSize,
-      heightsPtr,
-      mergeAPtr,
-      mergeBPtr,
-    )
+    const result = distances
+      ? module._clusterDistanceMatrix(
+          dataPtr,
+          numSamples,
+          heightsPtr,
+          mergeAPtr,
+          mergeBPtr,
+        )
+      : module._hierarchicalCluster(
+          dataPtr,
+          numSamples,
+          vectorSize,
+          heightsPtr,
+          mergeAPtr,
+          mergeBPtr,
+        )
 
     if (result === -1) {
       throw new Error('aborted')
@@ -150,6 +154,31 @@ export async function hierarchicalClusterWasm(
     module._free(mergeAPtr)
     module._free(mergeBPtr)
   }
+}
+
+// Either input goes to the wasm heap as one Float32Array: the rows flattened,
+// or the distance matrix as is. A distance matrix is N×N by contract, so N is
+// its square root.
+function flattenInput(data?: NumericVector[], distances?: Float32Array) {
+  if (distances) {
+    const numSamples = Math.round(Math.sqrt(distances.length))
+    if (numSamples * numSamples !== distances.length) {
+      throw new Error(
+        `a distance matrix must be square, got ${distances.length} entries`,
+      )
+    }
+    return { numSamples, vectorSize: 0, flatData: distances }
+  }
+  if (!data) {
+    throw new Error('clusterData needs either data or distances')
+  }
+  const numSamples = data.length
+  const vectorSize = data[0]?.length ?? 0
+  const flatData = new Float32Array(numSamples * vectorSize)
+  for (let i = 0; i < numSamples; i++) {
+    flatData.set(data[i]!, i * vectorSize)
+  }
+  return { numSamples, vectorSize, flatData }
 }
 
 // Rebuilds the tree from stable slot indices (mergeA[i] < mergeB[i] always).

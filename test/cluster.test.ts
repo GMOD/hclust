@@ -43,6 +43,26 @@ describe('clusterData', () => {
     expect(result.order).toEqual([0, 1])
   })
 
+  it('passes a distance matrix through to the wasm wrapper', async () => {
+    vi.mocked(hierarchicalClusterWasm).mockResolvedValue({
+      tree: { name: 'Root', height: 3, children: [] },
+      order: [1, 0],
+      heights: new Float32Array([3]),
+      merges: [[0, 1]],
+    })
+    const distances = new Float32Array([0, 3, 0, 0])
+    const result = await clusterData({ distances, sampleLabels: ['a', 'b'] })
+    expect(hierarchicalClusterWasm).toHaveBeenCalledWith({
+      data: undefined,
+      distances,
+      sampleLabels: ['a', 'b'],
+      statusCallback: undefined,
+      checkCancellation: undefined,
+    })
+    expect(result.order).toEqual([1, 0])
+    expect(result.clustersGivenK).toEqual([[[0, 1]], [[0], [1]]])
+  })
+
   it('should pass sampleLabels to wasm wrapper', async () => {
     const mockWasmResult = {
       tree: {
