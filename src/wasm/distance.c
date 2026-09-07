@@ -120,6 +120,145 @@ static void findNearest(
   nn[i] = bestJ; nnDist[i] = bestDist; nnSize[i] = bestSize;
 }
 
+typedef struct {
+  float* distances;
+  int numSamples;
+  int* sizes;
+  int* activeList;
+  int* activePos;
+  float* lastHeight;
+  int* nn;
+  float* nnDist;
+  int* nnSize;
+  int numActive;
+} MergeState;
+
+// One merge: pick the pair, record it, fold the Lance-Williams update in, and
+// refresh the cached neighbours. Its own function for the reason
+// distanceRowChunk is: V8 tiers a wasm function up on how much it has run,
+// without on-stack replacement, and the merge loop as one long call stayed
+// in the baseline tier to the end — a precomputed matrix went through it at
+// half speed on the first call in a process.
+__attribute__((noinline))
+static void mergeStep(
+  MergeState* st, int iteration,
+  float* outHeights, int* outMergeA, int* outMergeB
+) {
+  float* distances = st->distances;
+  const int numSamples = st->numSamples;
+  int* sizes = st->sizes;
+  int* activeList = st->activeList;
+  int* activePos = st->activePos;
+  float* lastHeight = st->lastHeight;
+  int* nn = st->nn;
+  float* nnDist = st->nnDist;
+  int* nnSize = st->nnSize;
+  int numActive = st->numActive;
+
+  // --- Find minimum distance pair among active slots ---
+  // Tie-break by smallest combined cluster size: with sparse / many-tie
+  // input data (e.g. lots of identical zero-vector rows), strict < tie-
+  // breaking would cause one growing cluster to absorb every tied neighbor
+  // in sequence — a chain dendrogram. Preferring pairs of small clusters
+  // on ties yields a balanced binary merge of the tied points instead.
+  float minDist = INFINITY;
+  int minA = -1, minB = -1;
+  int minPairSize = INT_MAX;
+
+  for (int ai = 0; ai < numActive; ai++) {
+    int i = activeList[ai];
+    int j = nn[i];
+    float d = nnDist[i];
+    int pairSize = sizes[i] + nnSize[i];
+    int lo = i < j ? i : j, hi = i < j ? j : i;
+    int bestLo = minA < minB ? minA : minB;
+    int bestHi = minA < minB ? minB : minA;
+    if (d < minDist ||
+        (d == minDist &&
+         (pairSize < minPairSize ||
+          (pairSize == minPairSize &&
+           (lo < bestLo || (lo == bestLo && hi < bestHi)))))) {
+      minDist = d;
+      minA = i;
+      minB = j;
+      minPairSize = pairSize;
+    }
+  }
+
+  // Stable slot: ensure minA < minB (lower slot absorbs higher)
+  if (minA > minB) { int tmp = minA; minA = minB; minB = tmp; }
+
+  int sizeA = sizes[minA];
+  int sizeB = sizes[minB];
+  int newSize = sizeA + sizeB;
+
+  // Monotonicity clamp: a merge cannot sit lower than either of its children.
+  float clampedHeight = minDist;
+  if (lastHeight[minA] > clampedHeight) clampedHeight = lastHeight[minA];
+  if (lastHeight[minB] > clampedHeight) clampedHeight = lastHeight[minB];
+  outHeights[iteration] = clampedHeight;
+  // minA is the surviving slot for the merged cluster, so future merges
+  // involving this cluster will read lastHeight[minA]. minB is retired.
+  lastHeight[minA] = clampedHeight;
+  outMergeA[iteration]  = minA;
+  outMergeB[iteration]  = minB;
+
+  // --- Lance-Williams UPGMA distance update ---
+  // Weights and the multiply-add are computed in double so n-1 chained
+  // updates don't accumulate float32 rounding error in the distance matrix.
+  // Storage stays float for memory; only intermediates are promoted.
+  const double wA = (double)sizeA / (double)newSize;
+  const double wB = (double)sizeB / (double)newSize;
+  float* rowA = distances + (size_t)minA * numSamples;
+  const float* rowB = distances + (size_t)minB * numSamples;
+  for (int ai = 0; ai < numActive; ai++) {
+    int k = activeList[ai];
+    if (k == minA || k == minB) continue;
+    float newDist = (float)(wA * (double)rowA[k] + wB * (double)rowB[k]);
+    rowA[k] = newDist;
+    distances[(size_t)k * numSamples + minA] = newDist;
+  }
+
+  sizes[minA] = newSize;
+
+  // --- Remove minB from active list (swap with last) ---
+  int posB     = activePos[minB];
+  int lastSlot = activeList[numActive - 1];
+  activeList[posB]    = lastSlot;
+  activePos[lastSlot] = posB;
+  numActive--;
+  st->numActive = numActive;
+
+  if (numActive < 2) return;
+
+  // --- Refresh cached neighbours ---
+  // minA's whole row just moved, so it rescans. For everyone else the only
+  // new candidate is minA, an O(1) check — unless their cached neighbour was
+  // minA or minB, which is now stale (minB is gone, minA's distance moved)
+  // and has to rescan. That rescan is the algorithm's weak spot: on data
+  // where many clusters share a neighbour it fires often and the iteration
+  // degrades back toward O(k), which is why heavily tied input sees ~3x here
+  // rather than the ~40x that data with distinct distances gets.
+  findNearest(minA, distances, numSamples, sizes,
+              activeList, numActive, nn, nnDist, nnSize);
+  for (int ai = 0; ai < numActive; ai++) {
+    int k = activeList[ai];
+    if (k == minA) continue;
+    if (nn[k] == minA || nn[k] == minB) {
+      findNearest(k, distances, numSamples, sizes,
+                  activeList, numActive, nn, nnDist, nnSize);
+    } else {
+      float d = distances[(size_t)k * numSamples + minA];
+      if (d < nnDist[k] ||
+          (d == nnDist[k] &&
+           (newSize < nnSize[k] ||
+            (newSize == nnSize[k] && minA < nn[k])))) {
+        nn[k] = minA; nnDist[k] = d; nnSize[k] = newSize;
+      }
+    }
+  }
+}
+
 // The merge loop on an n×n matrix the caller owns. Only the upper triangle
 // (j > i) is read on entry — it is mirrored below, so a caller may fill just
 // that half — and the matrix is scratch afterwards: the Lance-Williams update
@@ -191,6 +330,10 @@ static int clusterDistances(
                 activeList, numActive, nn, nnDist, nnSize);
   }
 
+  MergeState st = {
+    distances, numSamples, sizes, activeList, activePos, lastHeight,
+    nn, nnDist, nnSize, numActive
+  };
   int totalIterations = numSamples - 1;
   const double progressIntervalMs = 100.0;
   double lastProgressTime = emscripten_get_now();
@@ -207,107 +350,7 @@ static int clusterDistances(
       }
     }
 
-    // --- Find minimum distance pair among active slots ---
-    // Tie-break by smallest combined cluster size: with sparse / many-tie
-    // input data (e.g. lots of identical zero-vector rows), strict < tie-
-    // breaking would cause one growing cluster to absorb every tied neighbor
-    // in sequence — a chain dendrogram. Preferring pairs of small clusters
-    // on ties yields a balanced binary merge of the tied points instead.
-    float minDist = INFINITY;
-    int minA = -1, minB = -1;
-    int minPairSize = INT_MAX;
-
-    for (int ai = 0; ai < numActive; ai++) {
-      int i = activeList[ai];
-      int j = nn[i];
-      float d = nnDist[i];
-      int pairSize = sizes[i] + nnSize[i];
-      int lo = i < j ? i : j, hi = i < j ? j : i;
-      int bestLo = minA < minB ? minA : minB;
-      int bestHi = minA < minB ? minB : minA;
-      if (d < minDist ||
-          (d == minDist &&
-           (pairSize < minPairSize ||
-            (pairSize == minPairSize &&
-             (lo < bestLo || (lo == bestLo && hi < bestHi)))))) {
-        minDist = d;
-        minA = i;
-        minB = j;
-        minPairSize = pairSize;
-      }
-    }
-
-    // Stable slot: ensure minA < minB (lower slot absorbs higher)
-    if (minA > minB) { int tmp = minA; minA = minB; minB = tmp; }
-
-    int sizeA = sizes[minA];
-    int sizeB = sizes[minB];
-    int newSize = sizeA + sizeB;
-
-    // Monotonicity clamp: a merge cannot sit lower than either of its children.
-    float clampedHeight = minDist;
-    if (lastHeight[minA] > clampedHeight) clampedHeight = lastHeight[minA];
-    if (lastHeight[minB] > clampedHeight) clampedHeight = lastHeight[minB];
-    outHeights[iteration] = clampedHeight;
-    // minA is the surviving slot for the merged cluster, so future merges
-    // involving this cluster will read lastHeight[minA]. minB is retired.
-    lastHeight[minA] = clampedHeight;
-    outMergeA[iteration]  = minA;
-    outMergeB[iteration]  = minB;
-
-    // --- Lance-Williams UPGMA distance update ---
-    // Weights and the multiply-add are computed in double so n-1 chained
-    // updates don't accumulate float32 rounding error in the distance matrix.
-    // Storage stays float for memory; only intermediates are promoted.
-    const double wA = (double)sizeA / (double)newSize;
-    const double wB = (double)sizeB / (double)newSize;
-    float* rowA = distances + (size_t)minA * numSamples;
-    const float* rowB = distances + (size_t)minB * numSamples;
-    for (int ai = 0; ai < numActive; ai++) {
-      int k = activeList[ai];
-      if (k == minA || k == minB) continue;
-      float newDist = (float)(wA * (double)rowA[k] + wB * (double)rowB[k]);
-      rowA[k] = newDist;
-      distances[(size_t)k * numSamples + minA] = newDist;
-    }
-
-    sizes[minA] = newSize;
-
-    // --- Remove minB from active list (swap with last) ---
-    int posB     = activePos[minB];
-    int lastSlot = activeList[numActive - 1];
-    activeList[posB]    = lastSlot;
-    activePos[lastSlot] = posB;
-    numActive--;
-
-    if (numActive < 2) continue;
-
-    // --- Refresh cached neighbours ---
-    // minA's whole row just moved, so it rescans. For everyone else the only
-    // new candidate is minA, an O(1) check — unless their cached neighbour was
-    // minA or minB, which is now stale (minB is gone, minA's distance moved)
-    // and has to rescan. That rescan is the algorithm's weak spot: on data
-    // where many clusters share a neighbour it fires often and the iteration
-    // degrades back toward O(k), which is why heavily tied input sees ~3x here
-    // rather than the ~40x that data with distinct distances gets.
-    findNearest(minA, distances, numSamples, sizes,
-                activeList, numActive, nn, nnDist, nnSize);
-    for (int ai = 0; ai < numActive; ai++) {
-      int k = activeList[ai];
-      if (k == minA) continue;
-      if (nn[k] == minA || nn[k] == minB) {
-        findNearest(k, distances, numSamples, sizes,
-                    activeList, numActive, nn, nnDist, nnSize);
-      } else {
-        float d = distances[(size_t)k * numSamples + minA];
-        if (d < nnDist[k] ||
-            (d == nnDist[k] &&
-             (newSize < nnSize[k] ||
-              (newSize == nnSize[k] && minA < nn[k])))) {
-          nn[k] = minA; nnDist[k] = d; nnSize[k] = newSize;
-        }
-      }
-    }
+    mergeStep(&st, iteration, outHeights, outMergeA, outMergeB);
   }
 
   rc = 0;
