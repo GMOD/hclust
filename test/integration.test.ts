@@ -11,6 +11,19 @@ function sortedClusters(clusters: number[][]) {
 }
 
 describe('clusterData integration', () => {
+  it('refuses a matrix the wasm heap cannot hold, before allocating', async () => {
+    const data = Array.from({ length: 25000 }, () => [0])
+    await expect(clusterData({ data })).rejects.toThrow(
+      'out of memory clustering 25000 samples x 1 columns: the input matrix needs 0.00GB and the distance matrix 2.50GB',
+    )
+  })
+
+  it('rejects ragged rows instead of padding or overrunning', async () => {
+    await expect(clusterData({ data: [[1, 2], [3]] })).rejects.toThrow(
+      'row 1 has 1 columns, row 0 has 2',
+    )
+  })
+
   it('clusters 2 samples correctly', async () => {
     const data = [[1], [3]]
     const result = await clusterData({ data })

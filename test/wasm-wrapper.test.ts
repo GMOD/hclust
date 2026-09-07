@@ -18,12 +18,16 @@ vi.mock('../src/wasm/distance.js', () => ({
   default: vi.fn(() => Promise.resolve(mockModule)),
 }))
 
+// Real malloc never hands out address 0, and the wrapper reads 0 as a failed
+// allocation, so the mock heap starts one word in.
+const HEAP_BASE = 1
+
 describe('wasm-wrapper', () => {
-  let memoryOffset = 0
+  let memoryOffset = HEAP_BASE
 
   beforeEach(() => {
     vi.clearAllMocks()
-    memoryOffset = 0
+    memoryOffset = HEAP_BASE
 
     mockModule._malloc.mockImplementation((size: number) => {
       const offset = memoryOffset
@@ -73,15 +77,58 @@ describe('wasm-wrapper', () => {
       [3.5, 4.5],
     ]
 
-    const heapSpy = vi.spyOn(mockModule.HEAPF32, 'set')
     mockModule.HEAPF32.fill(0)
     mockModule.HEAP32.fill(0)
 
     await hierarchicalClusterWasm({ data })
 
-    expect(heapSpy).toHaveBeenCalled()
-    const flatData = heapSpy.mock.calls[0]?.[0] as Float32Array
-    expect(Array.from(flatData)).toEqual([1.5, 2.5, 3.5, 4.5])
+    expect(
+      Array.from(mockModule.HEAPF32.subarray(HEAP_BASE, HEAP_BASE + 4)),
+    ).toEqual([1.5, 2.5, 3.5, 4.5])
+  })
+
+  it('should reject a ragged row by name before touching the module', async () => {
+    await expect(
+      hierarchicalClusterWasm({ data: [[1, 2], [3]] }),
+    ).rejects.toThrow('row 1 has 1 columns, row 0 has 2')
+    expect(mockModule._malloc).not.toHaveBeenCalled()
+  })
+
+  it('should refuse a matrix the 2GB heap cannot hold before allocating', async () => {
+    const wide = { length: 300_000_000 }
+    await expect(
+      hierarchicalClusterWasm({ data: [wide, wide] }),
+    ).rejects.toThrow(
+      'out of memory clustering 2 samples x 300000000 columns: the input matrix needs 2.40GB and the distance matrix 0.00GB, both inside a 2.15GB wasm heap',
+    )
+    expect(mockModule._malloc).not.toHaveBeenCalled()
+  })
+
+  it('should treat a null malloc as out of memory and still free the rest', async () => {
+    mockModule._malloc.mockReturnValueOnce(0)
+    await expect(
+      hierarchicalClusterWasm({
+        data: [
+          [1, 2],
+          [3, 4],
+        ],
+      }),
+    ).rejects.toThrow('out of memory clustering 2 samples x 2 columns')
+    expect(mockModule._free).toHaveBeenCalledTimes(4)
+  })
+
+  it('should report both allocations when the C side runs out of memory', async () => {
+    mockModule._hierarchicalCluster.mockReturnValue(-3)
+    await expect(
+      hierarchicalClusterWasm({
+        data: [
+          [1, 2],
+          [3, 4],
+        ],
+      }),
+    ).rejects.toThrow(
+      'the input matrix needs 0.00GB and the distance matrix 0.00GB',
+    )
   })
 
   it('should call hierarchicalCluster with correct parameters', async () => {
@@ -169,7 +216,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 2
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
     const mergeAOffset = heightsOffset + (numSamples - 1)
     const mergeBOffset = mergeAOffset + (numSamples - 1)
 
@@ -197,7 +244,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 2
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
     const mergeAOffset = heightsOffset + (numSamples - 1)
     const mergeBOffset = mergeAOffset + (numSamples - 1)
 
@@ -223,7 +270,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 2
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
     const mergeAOffset = heightsOffset + (numSamples - 1)
     const mergeBOffset = mergeAOffset + (numSamples - 1)
 
@@ -249,7 +296,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 2
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
     const mergeAOffset = heightsOffset + (numSamples - 1)
     const mergeBOffset = mergeAOffset + (numSamples - 1)
     const orderOffset = mergeBOffset + (numSamples - 1)
@@ -276,7 +323,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 2
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
 
     mockModule.HEAPF32[heightsOffset] = 1.5
 
@@ -298,7 +345,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 2
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
     const mergeAOffset = heightsOffset + (numSamples - 1)
     const mergeBOffset = mergeAOffset + (numSamples - 1)
 
@@ -476,7 +523,7 @@ describe('wasm-wrapper', () => {
     const numSamples = 3
     const vectorSize = 2
     const dataSize = numSamples * vectorSize
-    const heightsOffset = (dataSize * 4) / 4
+    const heightsOffset = HEAP_BASE + dataSize
     const mergeAOffset = heightsOffset + (numSamples - 1)
     const mergeBOffset = mergeAOffset + (numSamples - 1)
 

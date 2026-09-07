@@ -4,6 +4,9 @@ import type { ClusterNode, ClusterProgress, NumericVector } from './types.ts'
 
 type ClusteringModule = Awaited<ReturnType<typeof createClusteringModule>>
 
+// MAXIMUM_MEMORY in scripts/build_wasm.sh
+const HEAP_MAX_BYTES = 2 ** 31
+
 let modulePromise: Promise<ClusteringModule> | null = null
 
 function getModule() {
@@ -14,6 +17,25 @@ function getModule() {
     })
   }
   return modulePromise
+}
+
+function clusteringHeapBytes(numSamples: number, vectorSize: number) {
+  return {
+    data: numSamples * vectorSize * 4,
+    distances: numSamples * numSamples * 4,
+    results: 3 * (numSamples - 1) * 4,
+  }
+}
+
+function gigabytes(bytes: number) {
+  return `${(bytes / 1e9).toFixed(2)}GB`
+}
+
+function outOfMemoryError(numSamples: number, vectorSize: number) {
+  const { data, distances } = clusteringHeapBytes(numSamples, vectorSize)
+  return new Error(
+    `out of memory clustering ${numSamples} samples x ${vectorSize} columns: the input matrix needs ${gigabytes(data)} and the distance matrix ${gigabytes(distances)}, both inside a ${gigabytes(HEAP_MAX_BYTES)} wasm heap`,
+  )
 }
 
 export interface ClusteringResult {
@@ -36,13 +58,26 @@ export async function hierarchicalClusterWasm(
 ): Promise<ClusteringResult> {
   const { data, distances, sampleLabels, statusCallback, checkCancellation } =
     options
-  const module = await getModule()
-  const { numSamples, vectorSize, flatData } = flattenInput(data, distances)
+  const { numSamples, vectorSize, rows, rowStride } = describeInput(
+    data,
+    distances,
+  )
   if (numSamples < 2) {
     throw new Error('clusterData requires at least 2 samples')
   }
+  const bytes = clusteringHeapBytes(numSamples, vectorSize)
+  const inputBytes = rows.length * rowStride * 4
+  // a precomputed matrix is clustered in place, so it is the input allocation
+  // and the distance matrix at once rather than one beside the other
+  const heapNeeded = distances
+    ? inputBytes + bytes.results
+    : inputBytes + bytes.distances + bytes.results
+  if (heapNeeded > HEAP_MAX_BYTES) {
+    throw outOfMemoryError(numSamples, vectorSize)
+  }
 
-  const dataPtr = module._malloc(flatData.length * 4)
+  const module = await getModule()
+  const dataPtr = module._malloc(inputBytes)
   const heightsPtr = module._malloc((numSamples - 1) * 4)
   const mergeAPtr = module._malloc((numSamples - 1) * 4)
   const mergeBPtr = module._malloc((numSamples - 1) * 4)
@@ -50,7 +85,13 @@ export async function hierarchicalClusterWasm(
   let callbackPtr: number | null = null
 
   try {
-    module.HEAPF32.set(flatData, dataPtr / 4)
+    if (!dataPtr || !heightsPtr || !mergeAPtr || !mergeBPtr) {
+      throw outOfMemoryError(numSamples, vectorSize)
+    }
+    const heap = module.HEAPF32
+    for (let i = 0; i < rows.length; i++) {
+      heap.set(rows[i]!, dataPtr / 4 + i * rowStride)
+    }
 
     if (statusCallback || checkCancellation) {
       const progressCallback = (iteration: number, totalIterations: number) => {
@@ -104,10 +145,7 @@ export async function hierarchicalClusterWasm(
       throw new Error('input contains non-finite values (NaN or Infinity)')
     }
     if (result === -3) {
-      const gb = ((numSamples * numSamples * 4) / 1e9).toFixed(2)
-      throw new Error(
-        `out of memory clustering ${numSamples} samples: the distance matrix alone needs ${gb}GB`,
-      )
+      throw outOfMemoryError(numSamples, vectorSize)
     }
 
     const heights = new Float32Array(numSamples - 1)
@@ -156,10 +194,10 @@ export async function hierarchicalClusterWasm(
   }
 }
 
-// Either input goes to the wasm heap as one Float32Array: the rows flattened,
-// or the distance matrix as is. A distance matrix is N×N by contract, so N is
-// its square root.
-function flattenInput(data?: NumericVector[], distances?: Float32Array) {
+// Either input goes to the wasm heap row by row, without a staging copy: the
+// rows as they are, or a precomputed distance matrix as one row of N² values. A
+// distance matrix is N×N by contract, so N is its square root.
+function describeInput(data?: NumericVector[], distances?: Float32Array) {
   if (distances) {
     const numSamples = Math.round(Math.sqrt(distances.length))
     if (numSamples * numSamples !== distances.length) {
@@ -167,18 +205,29 @@ function flattenInput(data?: NumericVector[], distances?: Float32Array) {
         `a distance matrix must be square, got ${distances.length} entries`,
       )
     }
-    return { numSamples, vectorSize: 0, flatData: distances }
+    return {
+      numSamples,
+      vectorSize: 0,
+      rows: [distances],
+      rowStride: distances.length,
+    }
   }
   if (!data) {
     throw new Error('clusterData needs either data or distances')
   }
-  const numSamples = data.length
   const vectorSize = data[0]?.length ?? 0
-  const flatData = new Float32Array(numSamples * vectorSize)
-  for (let i = 0; i < numSamples; i++) {
-    flatData.set(data[i]!, i * vectorSize)
+  for (let i = 1; i < data.length; i++) {
+    const length = data[i]!.length
+    if (length !== vectorSize) {
+      throw new Error(`row ${i} has ${length} columns, row 0 has ${vectorSize}`)
+    }
   }
-  return { numSamples, vectorSize, flatData }
+  return {
+    numSamples: data.length,
+    vectorSize,
+    rows: data,
+    rowStride: vectorSize,
+  }
 }
 
 // Rebuilds the tree from stable slot indices (mergeA[i] < mergeB[i] always).

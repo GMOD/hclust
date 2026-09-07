@@ -16,10 +16,11 @@ then merges the closest clusters at each step until one cluster remains,
 producing a dendrogram. Equivalent to R's `hclust(method="average")`.
 
 Roughly O(N²) in time and memory: 3,000 samples cluster in ~0.3s and 10,000 in
-~5.5s. Input with many tied distances (identical or near-identical rows) is
-several times slower, since a tie forces a rescan for a new nearest neighbour.
-The N×N distance matrix sets the ceiling — 400MB at N=10,000 — so very large
-inputs run out of memory before they run out of time. See
+~5.5s. Input with many tied distances is much slower, since a tie forces a
+rescan for a new nearest neighbour: 3,202 rows carrying only 9 distinct values
+took 27s where 3,202 distinct rows took 0.36s. The wasm heap is 2GB and holds
+the N×V input beside the N×N distance matrix (400MB at N=10,000), so a matrix
+the two cannot share is refused up front with both sizes in the message. See
 [docs/optimizations.md](docs/optimizations.md) for how this got fast.
 
 ## Usage
@@ -70,10 +71,11 @@ Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
 ## Input
 
 - At least 2 samples, or `clusterData` throws.
-- Every row the same length as the first, which sets the vector size. Nothing
-  validates ragged input: a short row picks up zero padding, a long one overruns
-  into the next sample.
+- Every row the same length as the first, or `clusterData` throws naming the
+  row.
 - No `NaN` or `Infinity`, or `clusterData` throws.
+- N×V×4 + N²×4 bytes within the 2GB wasm heap, or `clusterData` throws before
+  allocating anything.
 - Without `sampleLabels`, leaves come back as `Sample 0`, `Sample 1`, …
 
 ## Precomputed distances
@@ -92,7 +94,8 @@ Only the upper triangle (column > row) is read, so a producer may leave the
 diagonal and the lower half unset. The run skips the distance phase and goes
 straight to the merge loop, so `onProgress` reports only `init` and
 `clustering`. A matrix that is not square, or holds a `NaN` or `Infinity`,
-throws.
+throws. It is clustered in place rather than beside a matrix computed here, so
+the heap budget is N²×4 bytes alone.
 
 ## Other exports
 
