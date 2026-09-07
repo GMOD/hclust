@@ -1,3 +1,17 @@
+## [5.2.0](https://github.com/GMOD/hclust/compare/v5.1.0...v5.2.0) (2026-09-07)
+
+### Documentation
+
+- The merge loop tiers up on the first call, and why ([8696cb1](https://github.com/GMOD/hclust/commit/8696cb1e9dd8ce9c33e760384e0f1ffe6f249021))
+
+### Features
+
+- ClusterData takes a precomputed distance matrix ([1dc718f](https://github.com/GMOD/hclust/commit/1dc718f6c4d9be9c79fd0a18f5cec8538a144ff8))
+
+### Performance Improvements
+
+- The merge loop tiers up on the first call ([b522efa](https://github.com/GMOD/hclust/commit/b522efa5e0dc831fdb2be24e7edbf038dc165978))
+
 ## [5.1.0](https://github.com/GMOD/hclust/compare/v5.0.0...v5.1.0) (2026-08-24)
 
 ### Documentation
