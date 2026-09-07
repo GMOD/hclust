@@ -241,7 +241,10 @@ Genomes matrices (measured in jbrowse-components,
 `browser-tests/probe-gpu-distance-matrix.ts`). `clusterData({ distances })`
 takes that matrix and runs only the merge loop on it; the build here writes the
 upper triangle and the merge entry mirrors it, so a producer fills the same
-half.
+half. That entry made the merge loop the whole call, and step 6's tiering
+problem showed up again: as one long call it stayed in V8's baseline tier, 285
+ms at N = 2504 on the first call against ~100 ms warm. Each merge is now its own
+function, `mergeStep`, and the first call is 155 ms.
 
 ## Methodology
 
