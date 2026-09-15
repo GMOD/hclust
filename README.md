@@ -1,27 +1,14 @@
 # @gmod/hclust
 
 Fast hierarchical clustering (UPGMA) compiled to WebAssembly with
-JavaScript/TypeScript bindings.
+JavaScript/TypeScript bindings. Equivalent to R's `hclust(method="average")`
+over Euclidean distances.
 
 ## Install
 
 ```sh
 npm install @gmod/hclust
 ```
-
-## Algorithm
-
-Agglomerative clustering with average linkage. Computes Euclidean distances,
-then merges the closest clusters at each step until one cluster remains,
-producing a dendrogram. Equivalent to R's `hclust(method="average")`.
-
-Roughly O(N²) in time and memory: 3,000 samples cluster in ~0.3s and 10,000 in
-~5.5s. Input with many tied distances is much slower, since a tie forces a
-rescan for a new nearest neighbour: 3,202 rows carrying only 9 distinct values
-took 27s where 3,202 distinct rows took 0.36s. The wasm heap is 2GB and holds
-the N×V input beside the N×N distance matrix (400MB at N=10,000), so a matrix
-the two cannot share is refused up front with both sizes in the message. See
-[docs/optimizations.md](docs/optimizations.md) for how this got fast.
 
 ## Usage
 
@@ -40,7 +27,7 @@ const newick = toNewick(result.tree)
 const tree = fromNewick(newick)
 ```
 
-`clusterData` is also available if you have separate arrays:
+`clusterData` takes separate arrays. Rows may be plain or typed arrays:
 
 ```typescript
 import { clusterData } from '@gmod/hclust'
@@ -55,98 +42,41 @@ const result = await clusterData({
 })
 ```
 
-Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
+### Options
+
+- `sampleLabels` — leaf names; defaults to `Sample 0`, `Sample 1`, …
+- `distances` — a precomputed N×N row-major `Float32Array` in place of `data`.
+  Only the upper triangle is read.
+- `onProgress({ phase, message, current, total })` — called at most every 100ms.
+  `phase` is `'init' | 'distance' | 'clustering'`; `init` has `total === 0`.
+- `signal` — an `AbortSignal`; the run rejects within about 50ms of an abort.
+
+`clusterData` throws on fewer than 2 samples, ragged rows, `NaN`/`Infinity`, or
+input too large for the 2GB wasm heap.
 
 ## Result
 
-- `tree: ClusterNode` — root of the dendrogram. Leaves have `height` 0 and no
-  `children`.
+- `tree: ClusterNode` — root of the dendrogram. Leaves have `height` 0.
 - `order: number[]` — sample indices in left-to-right leaf order.
-- `clustersGivenK: number[][][]` — `clustersGivenK[k]` is the partition into
-  `k+1` clusters, each cluster an array of sample indices. It holds every level
-  at once, so it costs O(N²) memory (~330MB at N=3000) and builds on first
-  access rather than up front. Leave it alone if you only need `tree` and
-  `order`.
-
-## Input
-
-- At least 2 samples, or `clusterData` throws.
-- Every row the same length as the first, or `clusterData` throws naming the
-  row.
-- No `NaN` or `Infinity`, or `clusterData` throws.
-- N×V×4 + N²×4 bytes within the 2GB wasm heap, or `clusterData` throws before
-  allocating anything. Runs in flight at once share that heap, and one that
-  cannot fit beside the others throws saying how many there are.
-- Without `sampleLabels`, leaves come back as `Sample 0`, `Sample 1`, …
-
-## Precomputed distances
-
-Pass `distances` instead of `data` to cluster a matrix built elsewhere — on a
-GPU, or under another metric:
-
-```typescript
-const result = await clusterData({
-  distances, // Float32Array, N×N row-major
-  sampleLabels,
-})
-```
-
-Only the upper triangle (column > row) is read, so a producer may leave the
-diagonal and the lower half unset. The run skips the distance phase and goes
-straight to the merge loop, so `onProgress` reports only `init` and
-`clustering`. A matrix that is not square, or holds a `NaN` or `Infinity`,
-throws. It is clustered in place rather than beside a matrix computed here, so
-the heap budget is N²×4 bytes alone.
+- `clustersGivenK: number[][][]` — `clustersGivenK[k]` partitions the samples
+  into `k+1` clusters. Built lazily, and O(N²) memory (~330MB at N=3000).
 
 ## Other exports
 
-- `toNewick(node)` / `fromNewick(string)` — Newick serialization, writing merge
-  heights as `:` branch lengths (`(A:1.5,B:1.5)`). `fromNewick` reads that back
-  into absolute heights, and still accepts the label form v4 wrote
-  (`(A,B)1.5000`). See [docs/newick.md](docs/newick.md).
-- `quoteName(name)` — the Newick quoting rule `toNewick` uses, exported so a
-  caller writing its own Newick escapes names the same way `fromNewick` expects.
-- `treeToJSON(node)` — plain-object copy of a tree, dropping empty `children`.
+- `toNewick(node)` / `fromNewick(string)` — Newick serialization with merge
+  heights as branch lengths.
+- `quoteName(name)` — the name quoting `toNewick` uses.
+- `treeToJSON(node)` — plain-object copy of a tree.
 - `printTree(node)` — ASCII dendrogram, for debugging.
 
-## Progress
+## Docs
 
-Pass `onProgress` to observe a run. Reports arrive at most once per 100ms, so a
-small run may only ever emit the `init` phase:
-
-```typescript
-clusterData({
-  data,
-  onProgress: ({ phase, message, current, total }) => {
-    // phase: 'init' | 'distance' | 'clustering'
-    // 'init' carries no denominator (total === 0) — render it indeterminate
-    const label = total
-      ? `${message}: ${Math.round((current / total) * 100)}%`
-      : message
-    console.log(label)
-  },
-})
-```
-
-`message` is an unformatted phase label and `current`/`total` are raw counts, so
-a caller can drive a determinate progress bar off them.
-
-## Cancellation
-
-Pass an `AbortSignal`:
-
-```typescript
-const controller = new AbortController()
-const run = clusterData({ data, signal: controller.signal })
-controller.abort() // run rejects with the signal's reason
-```
-
-The run works in slices of about 50ms and yields a task between them, so an
-abort lands within about 50ms, including one posted to a web worker as a
-message, and the run frees everything it held. A signal that has already aborted
-rejects before any work starts. Two runs in flight at once interleave slice by
-slice. See [docs/cancellation.md](docs/cancellation.md) for a worker and for how
-each environment yields.
+- [docs/optimizations.md](docs/optimizations.md) — how the clustering got fast,
+  benchmark results, memory limits, and the cost of tied input
+- [docs/newick.md](docs/newick.md) — the Newick format `toNewick` writes, and
+  reading the v4 format
+- [docs/cancellation.md](docs/cancellation.md) — cancelling from a web worker,
+  and how each environment yields between slices
 
 ## References
 
