@@ -147,7 +147,7 @@ carries the three commands at the top of the file.
 # Current build, callback and tied-input regimes included
 pnpm bench
 
-# The tables in docs/optimizations.md, both of which regenerate
+# The tables in docs/optimizations.md, all of which regenerate
 pnpm bench:generations   # three C generations, compiled from their commits
 pnpm bench:greenelab     # the original JS implementation vs the shipped wasm
 
@@ -156,7 +156,9 @@ pnpm bench:greenelab     # the original JS implementation vs the shipped wasm
 pnpm bench:real [vcf.gz]
 ```
 
-`bench:generations` needs a host `cc`, not emscripten. `bench:greenelab`
-installs its baseline into a gitignored `build/` on first run. `bench:real`
-reads the bundled 1000 Genomes slice in `benchmarks/data/` (2504 samples, 1 Mb
-of chr22) with no tools beyond node, and takes a couple of minutes.
+All three read the bundled 1000 Genomes slice in `benchmarks/data/` (2504
+samples, 1 Mb of chr22) through `scripts/real-matrices.mjs`, with no tools
+beyond node. `bench:generations` also needs a host `cc`, not emscripten.
+`bench:greenelab` installs its baseline into a gitignored `build/` on first run
+and takes the better part of an hour over every case; pass case indices to run a
+subset. `bench:real` takes a couple of minutes.

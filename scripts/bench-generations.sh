@@ -6,7 +6,11 @@
 # gcc, not emscripten: the point is the algorithmic step, and emsdk is a much
 # heavier thing to require of anyone checking the numbers.
 #
-# Usage: pnpm bench:generations [N ...]
+# Input is the real genotype matrices from scripts/real-matrices.mjs. The
+# defaults are the two 2504-sample windows narrow enough for generation 1 to
+# finish in under a minute a run; pass case indices to choose others.
+#
+# Usage: pnpm bench:generations [case index ...]
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,6 +34,16 @@ done
 cc -O2 -I"$src" -c "$src/harness.c" -o "$out/harness.o"
 cc "$out"/g*.o "$out/harness.o" -lm -o "$out/bench"
 
-echo "Best of 3 runs (ms), data[i][j] = sin(i*31 + j*7) * 100, V = 20"
+indices=("$@")
+if [ ${#indices[@]} -eq 0 ]; then
+  indices=(0 2)
+fi
+matrices=()
+for i in "${indices[@]}"; do
+  node scripts/real-matrices.mjs "$i" "$out/case$i.bin"
+  matrices+=("$out/case$i.bin")
+done
+
+echo "Best of 3 runs (ms), 1000 Genomes genotype matrices"
 echo
-"$out/bench" "$@"
+"$out/bench" "${matrices[@]}"
