@@ -1,3 +1,9 @@
+## [6.0.0](https://github.com/GMOD/hclust/compare/v5.3.0...v6.0.0) (2026-09-15)
+
+### Features
+
+- **BREAKING** Cancel with an AbortSignal, in 50ms slices that free on abort ([2e8a90e](https://github.com/GMOD/hclust/commit/2e8a90e55d02f838fc229d6a62c8d0c392fa96f0))
+
 ## [5.3.0](https://github.com/GMOD/hclust/compare/v5.2.0...v5.3.0) (2026-09-07)
 
 ### Bug Fixes
