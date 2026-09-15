@@ -11,7 +11,7 @@ export async function clusterData({
   distances,
   sampleLabels,
   onProgress,
-  checkCancellation,
+  signal,
 }: ClusterOptions): Promise<ClusterResult> {
   onProgress?.({
     phase: 'init',
@@ -24,8 +24,8 @@ export async function clusterData({
     data,
     distances,
     sampleLabels,
-    statusCallback: onProgress,
-    checkCancellation,
+    onProgress,
+    signal,
   })
 
   // Lazy because it is O(N^2): every one of the N levels snapshots the whole
@@ -86,13 +86,13 @@ function buildClustersGivenK(numSamples: number, merges: [number, number][]) {
 export async function clusterObject({
   data,
   onProgress,
-  checkCancellation,
+  signal,
 }: ClusterObjectOptions) {
   const sampleLabels = Object.keys(data)
   return clusterData({
     data: Object.values(data),
     sampleLabels,
     onProgress,
-    checkCancellation,
+    signal,
   })
 }

@@ -32,7 +32,8 @@ export interface ClusterProgress {
 interface ClusterCommonOptions {
   sampleLabels?: string[]
   onProgress?: (progress: ClusterProgress) => void
-  checkCancellation?: () => void
+  /** Rejects the run with the signal's reason, within about 50ms of an abort. */
+  signal?: AbortSignal
 }
 
 export interface ClusterDataOptions extends ClusterCommonOptions {
@@ -57,5 +58,5 @@ export type ClusterOptions = ClusterDataOptions | ClusterDistancesOptions
 export interface ClusterObjectOptions {
   data: Record<string, NumericVector>
   onProgress?: (progress: ClusterProgress) => void
-  checkCancellation?: () => void
+  signal?: AbortSignal
 }

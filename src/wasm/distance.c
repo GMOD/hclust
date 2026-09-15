@@ -20,7 +20,10 @@
  *    each iteration is what made this O(n^3); it is now ~O(n^2) on data with
  *    few ties, which took n=5000 from 67s to 1.1s.
  *  - Leaf order is derived on the JS side from a left-to-right traversal of the
- *    rebuilt tree, so this routine only emits merges + heights.
+ *    rebuilt tree, so a run only emits merges + heights.
+ *  - A run is a heap-allocated Run that clusterStep advances in time-bounded
+ *    slices, so the caller can yield between them. Nothing is global, so runs
+ *    interleave.
  */
 
 #include <math.h>
@@ -29,15 +32,6 @@
 #include <limits.h>
 #include <emscripten.h>
 #include <wasm_simd128.h>
-
-typedef int (*ProgressCallback)(int iteration, int totalIterations);
-
-static ProgressCallback g_progressCallback = NULL;
-
-EMSCRIPTEN_KEEPALIVE
-void setProgressCallback(ProgressCallback callback) {
-  g_progressCallback = callback;
-}
 
 // Differences and squares in f32x4, promoted and accumulated in f64x2 every
 // 16 elements, so a float lane never sums more than four non-negative terms
@@ -72,11 +66,11 @@ static float euclideanDistance(
   return (float)sqrt(sum);
 }
 
-// Distances from row i to rows j0..jEnd-1, upper triangle only; the merge
-// loop mirrors it. A separate function on purpose: V8 promotes a wasm function from its baseline
-// tier on call count, without on-stack replacement, so one long call that did
-// all the work stayed baseline to the end and the first clustering in a fresh
-// worker ran at half speed.
+// Distances from row i to rows j0..jEnd-1, upper triangle only;
+// mirrorDistances copies it down. A separate function on purpose: V8 promotes
+// a wasm function from its baseline tier on call count, without on-stack
+// replacement, so one long call that did all the work stayed baseline to the
+// end and the first clustering in a fresh worker ran at half speed.
 __attribute__((noinline))
 static void distanceRowChunk(
   const float* data, int vectorSize, int numSamples,
@@ -120,9 +114,40 @@ static void findNearest(
   nn[i] = bestJ; nnDist[i] = bestDist; nnSize[i] = bestSize;
 }
 
+enum { STEP_DONE = 0, STEP_MORE = 1, STEP_NON_FINITE = 2 };
+
+enum {
+  PHASE_VALIDATE_ROWS,
+  PHASE_DISTANCES,
+  PHASE_MIRROR,
+  PHASE_NEAREST,
+  PHASE_MERGE,
+  PHASE_FINISHED
+};
+
+enum { PROGRESS_DISTANCE = 0, PROGRESS_CLUSTERING = 1 };
+
+// Reading the clock is a wasm->JS call (performance.now()). Once per pair it
+// cost several times the distance it guarded — n=5000 went from 464ms to
+// 1063ms — so each phase counts work instead and reads the clock once per
+// this many units, roughly one float operation each: a fraction of a
+// millisecond at any vector width.
+static const size_t WORK_PER_CLOCK_READ = 1 << 18;
+static const size_t PAIR_OVERHEAD_WORK = 64;
+
 typedef struct {
-  float* distances;
+  // phase (PROGRESS_*), current, total
+  int progress[3];
+  int phase;
+  int matrixInput;
   int numSamples;
+  int vectorSize;
+  float* data;
+  float* distances;
+  void* merges;
+  float* heights;
+  int* mergeA;
+  int* mergeB;
   int* sizes;
   int* activeList;
   int* activePos;
@@ -131,19 +156,18 @@ typedef struct {
   float* nnDist;
   int* nnSize;
   int numActive;
-} MergeState;
+  int row;
+  int col;
+  int pairsDone;
+  int iteration;
+} Run;
 
 // One merge: pick the pair, record it, fold the Lance-Williams update in, and
-// refresh the cached neighbours. Its own function for the reason
-// distanceRowChunk is: V8 tiers a wasm function up on how much it has run,
-// without on-stack replacement, and the merge loop as one long call stayed
-// in the baseline tier to the end — a precomputed matrix went through it at
-// half speed on the first call in a process.
+// refresh the cached neighbours. Noinline for the reason distanceRowChunk is:
+// the merge loop as one long call stayed in V8's baseline tier to the end, and
+// a precomputed matrix went through it at half speed on the first call.
 __attribute__((noinline))
-static void mergeStep(
-  MergeState* st, int iteration,
-  float* outHeights, int* outMergeA, int* outMergeB
-) {
+static void mergeStep(Run* st, int iteration) {
   float* distances = st->distances;
   const int numSamples = st->numSamples;
   int* sizes = st->sizes;
@@ -196,12 +220,12 @@ static void mergeStep(
   float clampedHeight = minDist;
   if (lastHeight[minA] > clampedHeight) clampedHeight = lastHeight[minA];
   if (lastHeight[minB] > clampedHeight) clampedHeight = lastHeight[minB];
-  outHeights[iteration] = clampedHeight;
+  st->heights[iteration] = clampedHeight;
   // minA is the surviving slot for the merged cluster, so future merges
   // involving this cluster will read lastHeight[minA]. minB is retired.
   lastHeight[minA] = clampedHeight;
-  outMergeA[iteration]  = minA;
-  outMergeB[iteration]  = minB;
+  st->mergeA[iteration] = minA;
+  st->mergeB[iteration] = minB;
 
   // --- Lance-Williams UPGMA distance update ---
   // Weights and the multiply-add are computed in double so n-1 chained
@@ -259,192 +283,277 @@ static void mergeStep(
   }
 }
 
-// The merge loop on an n×n matrix the caller owns. Only the upper triangle
-// (j > i) is read on entry — it is mirrored below, so a caller may fill just
-// that half — and the matrix is scratch afterwards: the Lance-Williams update
-// rewrites it in place.
-static int clusterDistances(
-  float* distances,
-  int numSamples,
-  float* outHeights,
-  int* outMergeA,
-  int* outMergeB
-) {
-  // -3 until proven otherwise: every allocation below jumps to cleanup on
-  // failure, and reporting that as -1 told the caller its own cancellation had
-  // fired.
-  int rc = -3;
-  int*   sizes      = NULL;
-  int*   activeList = NULL;
-  int*   activePos  = NULL;
-  float* lastHeight = NULL;
-  int*   nn         = NULL;
-  float* nnDist     = NULL;
-  int*   nnSize     = NULL;
-
-  for (int i = 0; i < numSamples; i++) {
-    distances[(size_t)i * numSamples + i] = 0.0f;
-    for (int j = i + 1; j < numSamples; j++) {
-      distances[(size_t)j * numSamples + i] = distances[(size_t)i * numSamples + j];
+// A single NaN/Inf would poison every distance it touches — NaN compares false
+// everywhere, so find-min would skip it and return a wrong tree without error.
+static int validateRows(Run* run, double deadline) {
+  const float* data = run->data;
+  const size_t n = run->numSamples;
+  const size_t v = run->vectorSize;
+  size_t work = 0;
+  for (size_t i = run->row; i < n; i++) {
+    const float* row = data + i * v;
+    for (size_t k = 0; k < v; k++) {
+      if (!isfinite(row[k])) return STEP_NON_FINITE;
     }
-  }
-
-  // --- Cluster sizes (for Lance-Williams weights) ---
-  sizes = (int*)malloc(numSamples * sizeof(int));
-  if (!sizes) goto cleanup;
-  for (int i = 0; i < numSamples; i++) sizes[i] = 1;
-
-  // --- Active-index list: activeList[0..numActive-1] holds live slot IDs ---
-  // activePos[slot] = position in activeList for O(1) swap-with-last removal
-  activeList = (int*)malloc(numSamples * sizeof(int));
-  activePos  = (int*)malloc(numSamples * sizeof(int));
-  if (!activeList || !activePos) goto cleanup;
-  for (int i = 0; i < numSamples; i++) {
-    activeList[i] = i;
-    activePos[i]  = i;
-  }
-  int numActive = numSamples;
-
-  // --- Per-slot last merge height, for monotonicity clamp.
-  // UPGMA satisfies reducibility, so heights should be non-decreasing along
-  // any root-ward path. Float rounding in repeated Lance-Williams updates can
-  // produce tiny inversions on near-tied data, which manifests as negative
-  // branch lengths in dendrograms. We clamp each merge height up to the max
-  // of its children's last merge heights.
-  lastHeight = (float*)malloc(numSamples * sizeof(float));
-  if (!lastHeight) goto cleanup;
-  for (int i = 0; i < numSamples; i++) lastHeight[i] = 0.0f;
-
-  // --- Cached nearest neighbour per active slot ---
-  // nn[i] is the active j minimising (distance, size, slot) lexicographically.
-  // Because the pair's combined size is sizes[i] + sizes[j] and sizes[i] is
-  // fixed while choosing j, minimising sizes[j] minimises the combined size,
-  // so the winner over all pairs is the best of these k candidates — the same
-  // pair the exhaustive scan used to find. See findNearest for the slot term.
-  nn     = (int*)malloc(numSamples * sizeof(int));
-  nnDist = (float*)malloc(numSamples * sizeof(float));
-  nnSize = (int*)malloc(numSamples * sizeof(int));
-  if (!nn || !nnDist || !nnSize) goto cleanup;
-  for (int ai = 0; ai < numActive; ai++) {
-    findNearest(activeList[ai], distances, numSamples, sizes,
-                activeList, numActive, nn, nnDist, nnSize);
-  }
-
-  MergeState st = {
-    distances, numSamples, sizes, activeList, activePos, lastHeight,
-    nn, nnDist, nnSize, numActive
-  };
-  int totalIterations = numSamples - 1;
-  const double progressIntervalMs = 100.0;
-  double lastProgressTime = emscripten_get_now();
-
-  for (int iteration = 0; iteration < totalIterations; iteration++) {
-    if (g_progressCallback) {
-      double now = emscripten_get_now();
-      if (now - lastProgressTime >= progressIntervalMs) {
-        if (g_progressCallback(iteration, totalIterations) == 0) {
-          rc = -1;
-          goto cleanup;
-        }
-        lastProgressTime = now;
-      }
-    }
-
-    mergeStep(&st, iteration, outHeights, outMergeA, outMergeB);
-  }
-
-  rc = 0;
-
-cleanup:
-  free(sizes);
-  free(activeList);
-  free(activePos);
-  free(lastHeight);
-  free(nn);
-  free(nnDist);
-  free(nnSize);
-  return rc;
-}
-
-// Clusters a precomputed n×n distance matrix — any metric, built anywhere
-// (a GPU, another library) — skipping the distance phase above. Same contract
-// as clusterDistances: the upper triangle is what is read, and the matrix is
-// scratch afterwards.
-EMSCRIPTEN_KEEPALIVE
-int clusterDistanceMatrix(
-  float* distances,
-  int numSamples,
-  float* outHeights,
-  int* outMergeA,
-  int* outMergeB
-) {
-  for (int i = 0; i < numSamples; i++) {
-    for (int j = i + 1; j < numSamples; j++) {
-      if (!isfinite(distances[(size_t)i * numSamples + j])) return -2;
-    }
-  }
-  return clusterDistances(distances, numSamples, outHeights, outMergeA, outMergeB);
-}
-
-EMSCRIPTEN_KEEPALIVE
-int hierarchicalCluster(
-  const float* data,
-  int numSamples,
-  int vectorSize,
-  float* outHeights,
-  int* outMergeA,
-  int* outMergeB
-) {
-  // --- Validate input: a single NaN/Inf would silently poison every distance
-  // (NaN compares false everywhere, so find-min would skip it and produce a
-  // wrong tree without an error). Cheap one-pass guard at entry.
-  {
-    size_t total = (size_t)numSamples * (size_t)vectorSize;
-    for (size_t i = 0; i < total; i++) {
-      if (!isfinite(data[i])) return -2;
-    }
-  }
-
-  // --- Distance matrix (full n×n, upper triangle computed here) ---
-  float* distances = (float*)malloc((size_t)numSamples * numSamples * sizeof(float));
-  if (!distances) return -3;
-
-  double lastProgressTime = emscripten_get_now();
-  const double progressIntervalMs = 100.0;
-  int totalDistCalcs = numSamples * (numSamples - 1);
-  int distCalcsDone = 0;
-
-  // Reading the clock is a wasm->JS call (performance.now()), so doing it once
-  // per pair — as this used to — costs several times more than the distance it
-  // guards: with a callback registered, n=5000 went from 464ms to 1063ms to
-  // deliver nine progress reports. Sample it every 1024th pair instead. That is
-  // well under the 100ms report interval at any realistic vector width, so the
-  // cadence is unchanged and the check leaves the profile.
-  const int clockPollInterval = 1024;
-  int sinceClockPoll = 0;
-
-  const int chunkPairs = 256;
-  for (int i = 0; i < numSamples; i++) {
-    for (int j0 = i + 1; j0 < numSamples; j0 += chunkPairs) {
-      int jEnd = j0 + chunkPairs < numSamples ? j0 + chunkPairs : numSamples;
-      distanceRowChunk(data, vectorSize, numSamples, i, j0, jEnd, distances);
-      distCalcsDone += 2 * (jEnd - j0);
-
-      if (g_progressCallback && (sinceClockPoll += jEnd - j0) >= clockPollInterval) {
-        sinceClockPoll = 0;
-        double now = emscripten_get_now();
-        if (now - lastProgressTime >= progressIntervalMs) {
-          if (g_progressCallback(-distCalcsDone, totalDistCalcs) == 0) {
-            free(distances);
-            return -1;
-          }
-          lastProgressTime = now;
-        }
+    work += v + 1;
+    if (work >= WORK_PER_CLOCK_READ) {
+      work = 0;
+      if (emscripten_get_now() >= deadline) {
+        run->row = i + 1;
+        return STEP_MORE;
       }
     }
   }
+  run->row = 0;
+  run->col = 1;
+  run->phase = PHASE_DISTANCES;
+  return STEP_DONE;
+}
 
-  int rc = clusterDistances(distances, numSamples, outHeights, outMergeA, outMergeB);
-  free(distances);
-  return rc;
+// The upper triangle, in chunks of pairs sized so one chunk stays under a
+// clock read at any vector width.
+static int fillDistances(Run* run, double deadline) {
+  const float* data = run->data;
+  float* distances = run->distances;
+  const int n = run->numSamples;
+  const int v = run->vectorSize;
+  const size_t pairWork = (size_t)v + PAIR_OVERHEAD_WORK;
+  size_t chunkPairs = WORK_PER_CLOCK_READ / pairWork;
+  if (chunkPairs > 256) chunkPairs = 256;
+  if (chunkPairs < 1) chunkPairs = 1;
+  int i = run->row;
+  int j0 = run->col;
+  int pairsDone = run->pairsDone;
+  size_t work = 0;
+  while (i < n - 1) {
+    int jEnd = n - j0 > (int)chunkPairs ? j0 + (int)chunkPairs : n;
+    distanceRowChunk(data, v, n, i, j0, jEnd, distances);
+    pairsDone += jEnd - j0;
+    work += (size_t)(jEnd - j0) * pairWork;
+    if (jEnd == n) {
+      i++;
+      j0 = i + 1;
+    } else {
+      j0 = jEnd;
+    }
+    if (work >= WORK_PER_CLOCK_READ) {
+      work = 0;
+      if (emscripten_get_now() >= deadline) {
+        run->row = i;
+        run->col = j0;
+        run->pairsDone = pairsDone;
+        run->progress[1] = 2 * pairsDone;
+        return STEP_MORE;
+      }
+    }
+  }
+  free(run->data);
+  run->data = NULL;
+  run->row = 0;
+  run->phase = PHASE_MIRROR;
+  run->progress[0] = PROGRESS_CLUSTERING;
+  run->progress[1] = 0;
+  run->progress[2] = n - 1;
+  return STEP_DONE;
+}
+
+// Only the upper triangle is read on entry; this copies it into the lower one,
+// checking a precomputed matrix for NaN/Inf on the way.
+static int mirrorDistances(Run* run, double deadline) {
+  float* distances = run->distances;
+  const size_t n = run->numSamples;
+  const int validate = run->matrixInput;
+  size_t work = 0;
+  for (size_t i = run->row; i < n; i++) {
+    const float* row = distances + i * n;
+    if (validate) {
+      for (size_t j = i + 1; j < n; j++) {
+        if (!isfinite(row[j])) return STEP_NON_FINITE;
+      }
+    }
+    distances[i * n + i] = 0.0f;
+    for (size_t j = i + 1; j < n; j++) {
+      distances[j * n + i] = row[j];
+    }
+    work += n - i;
+    if (work >= WORK_PER_CLOCK_READ) {
+      work = 0;
+      if (emscripten_get_now() >= deadline) {
+        run->row = i + 1;
+        return STEP_MORE;
+      }
+    }
+  }
+  run->row = 0;
+  run->phase = PHASE_NEAREST;
+  return STEP_DONE;
+}
+
+// nn[i] is the active j minimising (distance, size, slot) lexicographically.
+// Because the pair's combined size is sizes[i] + sizes[j] and sizes[i] is
+// fixed while choosing j, minimising sizes[j] minimises the combined size, so
+// the winner over all pairs is the best of these k candidates — the same pair
+// an exhaustive scan finds. See findNearest for the slot term.
+static int seedNearest(Run* run, double deadline) {
+  const float* distances = run->distances;
+  const int n = run->numSamples;
+  const int* sizes = run->sizes;
+  const int* activeList = run->activeList;
+  int* nn = run->nn;
+  float* nnDist = run->nnDist;
+  int* nnSize = run->nnSize;
+  size_t work = 0;
+  for (int ai = run->row; ai < n; ai++) {
+    findNearest(activeList[ai], distances, n, sizes,
+                activeList, n, nn, nnDist, nnSize);
+    work += n;
+    if (work >= WORK_PER_CLOCK_READ) {
+      work = 0;
+      if (emscripten_get_now() >= deadline) {
+        run->row = ai + 1;
+        return STEP_MORE;
+      }
+    }
+  }
+  run->iteration = 0;
+  run->phase = PHASE_MERGE;
+  return STEP_DONE;
+}
+
+// The clock is read after every merge: a merge that invalidates many cached
+// neighbours costs O(k^2), so a work count would undershoot on tied input.
+static int mergeAll(Run* run, double deadline) {
+  const int total = run->numSamples - 1;
+  int iteration = run->iteration;
+  while (iteration < total) {
+    mergeStep(run, iteration);
+    iteration++;
+    if (iteration < total && emscripten_get_now() >= deadline) {
+      run->iteration = iteration;
+      run->progress[1] = iteration;
+      return STEP_MORE;
+    }
+  }
+  run->iteration = total;
+  run->progress[1] = total;
+  run->phase = PHASE_FINISHED;
+  return STEP_DONE;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void clusterFree(Run* run) {
+  if (!run) return;
+  free(run->data);
+  free(run->distances);
+  free(run->merges);
+  free(run->sizes);
+  free(run->activeList);
+  free(run->activePos);
+  free(run->lastHeight);
+  free(run->nn);
+  free(run->nnDist);
+  free(run->nnSize);
+  free(run);
+}
+
+static Run* allocateRun(int numSamples, int vectorSize, int matrixInput) {
+  Run* run = (Run*)calloc(1, sizeof(Run));
+  if (!run) return NULL;
+  const size_t n = numSamples;
+  run->numSamples = numSamples;
+  run->vectorSize = vectorSize;
+  run->matrixInput = matrixInput;
+  run->distances = (float*)malloc(n * n * sizeof(float));
+  if (!matrixInput) {
+    run->data = (float*)malloc(n * (size_t)vectorSize * sizeof(float));
+  }
+  run->merges     = malloc((n - 1) * (sizeof(float) + 2 * sizeof(int)));
+  run->sizes      = (int*)malloc(n * sizeof(int));
+  run->activeList = (int*)malloc(n * sizeof(int));
+  run->activePos  = (int*)malloc(n * sizeof(int));
+  run->lastHeight = (float*)malloc(n * sizeof(float));
+  run->nn         = (int*)malloc(n * sizeof(int));
+  run->nnDist     = (float*)malloc(n * sizeof(float));
+  run->nnSize     = (int*)malloc(n * sizeof(int));
+  if (!run->distances || (!matrixInput && !run->data) || !run->merges ||
+      !run->sizes || !run->activeList || !run->activePos ||
+      !run->lastHeight || !run->nn || !run->nnDist || !run->nnSize) {
+    clusterFree(run);
+    return NULL;
+  }
+  run->heights = (float*)run->merges;
+  run->mergeA = (int*)((char*)run->merges + (n - 1) * sizeof(float));
+  run->mergeB = run->mergeA + (n - 1);
+  // lastHeight is the monotonicity clamp: float rounding in chained
+  // Lance-Williams updates can produce tiny inversions on near-tied data,
+  // which would draw as negative branch lengths.
+  for (size_t i = 0; i < n; i++) {
+    run->sizes[i] = 1;
+    run->activeList[i] = (int)i;
+    run->activePos[i] = (int)i;
+    run->lastHeight[i] = 0.0f;
+  }
+  run->numActive = numSamples;
+  return run;
+}
+
+// A run over n rows of vectorSize columns. The caller writes the rows into
+// clusterInput, then calls clusterStep until it returns STEP_DONE.
+EMSCRIPTEN_KEEPALIVE
+Run* clusterBeginRows(int numSamples, int vectorSize) {
+  Run* run = allocateRun(numSamples, vectorSize, 0);
+  if (!run) return NULL;
+  run->phase = PHASE_VALIDATE_ROWS;
+  run->progress[0] = PROGRESS_DISTANCE;
+  run->progress[2] = numSamples * (numSamples - 1);
+  return run;
+}
+
+// A run over a precomputed n×n matrix — any metric, built anywhere — skipping
+// the distance phase. Only the upper triangle is read, and the matrix is
+// scratch afterwards: the Lance-Williams update rewrites it in place.
+EMSCRIPTEN_KEEPALIVE
+Run* clusterBeginMatrix(int numSamples) {
+  Run* run = allocateRun(numSamples, 0, 1);
+  if (!run) return NULL;
+  run->phase = PHASE_MIRROR;
+  run->progress[0] = PROGRESS_CLUSTERING;
+  run->progress[2] = numSamples - 1;
+  return run;
+}
+
+EMSCRIPTEN_KEEPALIVE
+float* clusterInput(Run* run) {
+  return run->matrixInput ? run->distances : run->data;
+}
+
+// Advances the run until budgetMs has passed or it finishes. Returns
+// STEP_MORE, STEP_DONE, or STEP_NON_FINITE.
+EMSCRIPTEN_KEEPALIVE
+int clusterStep(Run* run, double budgetMs) {
+  const double deadline = emscripten_get_now() + budgetMs;
+  for (;;) {
+    int rc;
+    switch (run->phase) {
+      case PHASE_VALIDATE_ROWS: rc = validateRows(run, deadline); break;
+      case PHASE_DISTANCES:     rc = fillDistances(run, deadline); break;
+      case PHASE_MIRROR:        rc = mirrorDistances(run, deadline); break;
+      case PHASE_NEAREST:       rc = seedNearest(run, deadline); break;
+      case PHASE_MERGE:         rc = mergeAll(run, deadline); break;
+      default:                  return STEP_DONE;
+    }
+    if (rc != STEP_DONE) return rc;
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE
+const int* clusterProgress(Run* run) {
+  return run->progress;
+}
+
+// heights, then mergeA, then mergeB, n-1 entries each. Slot mergeA[i] absorbs
+// mergeB[i], and mergeA[i] < mergeB[i].
+EMSCRIPTEN_KEEPALIVE
+const void* clusterMerges(Run* run) {
+  return run->merges;
 }

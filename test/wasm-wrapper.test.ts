@@ -2,582 +2,267 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { hierarchicalClusterWasm } from '../src/wasm-wrapper.ts'
 
+const buffer = new ArrayBuffer(4096)
+const RUN = 4
+const PROGRESS = 32
+const INPUT = 64
+const MERGES = 2048
+const STEP_DONE = 0
+const STEP_MORE = 1
+const STEP_NON_FINITE = 2
+
 const mockModule = {
-  _malloc: vi.fn(),
-  _free: vi.fn(),
-  _hierarchicalCluster: vi.fn(),
-  _clusterDistanceMatrix: vi.fn(),
-  _setProgressCallback: vi.fn(),
-  addFunction: vi.fn(),
-  removeFunction: vi.fn(),
-  HEAPF32: new Float32Array(1000),
-  HEAP32: new Int32Array(1000),
+  HEAPF32: new Float32Array(buffer),
+  HEAP32: new Int32Array(buffer),
+  _clusterBeginRows: vi.fn(),
+  _clusterBeginMatrix: vi.fn(),
+  _clusterInput: vi.fn(),
+  _clusterStep: vi.fn(),
+  _clusterProgress: vi.fn(),
+  _clusterMerges: vi.fn(),
+  _clusterFree: vi.fn(),
 }
 
 vi.mock('../src/wasm/distance.js', () => ({
   default: vi.fn(() => Promise.resolve(mockModule)),
 }))
 
-// Real malloc never hands out address 0, and the wrapper reads 0 as a failed
-// allocation, so the mock heap starts one word in.
-const HEAP_BASE = 1
+function setMerges(heights: number[], pairs: [number, number][]) {
+  const m = heights.length
+  heights.forEach((h, i) => {
+    mockModule.HEAPF32[MERGES / 4 + i] = h
+    mockModule.HEAP32[MERGES / 4 + m + i] = pairs[i]![0]
+    mockModule.HEAP32[MERGES / 4 + 2 * m + i] = pairs[i]![1]
+  })
+}
+
+function setProgress(phase: number, current: number, total: number) {
+  mockModule.HEAP32.set([phase, current, total], PROGRESS / 4)
+}
+
+const twoRows = [
+  [1, 2],
+  [3, 4],
+]
 
 describe('wasm-wrapper', () => {
-  let memoryOffset = HEAP_BASE
-
   beforeEach(() => {
     vi.clearAllMocks()
-    memoryOffset = HEAP_BASE
+    vi.restoreAllMocks()
+    new Uint8Array(buffer).fill(0)
+    mockModule._clusterBeginRows.mockReturnValue(RUN)
+    mockModule._clusterBeginMatrix.mockReturnValue(RUN)
+    mockModule._clusterInput.mockReturnValue(INPUT)
+    mockModule._clusterStep.mockReturnValue(STEP_DONE)
+    mockModule._clusterProgress.mockReturnValue(PROGRESS)
+    mockModule._clusterMerges.mockReturnValue(MERGES)
+  })
 
-    mockModule._malloc.mockImplementation((size: number) => {
-      const offset = memoryOffset
-      memoryOffset += size / 4
-      return offset * 4
+  it('begins a row run and copies the rows into its input', async () => {
+    await hierarchicalClusterWasm({
+      data: [
+        [1.5, 2.5, 3],
+        [3.5, 4.5, 5],
+      ],
     })
-
-    mockModule._hierarchicalCluster.mockReturnValue(0)
-    mockModule._clusterDistanceMatrix.mockReturnValue(0)
-
-    mockModule.addFunction.mockReturnValue(12345)
-  })
-
-  it('should allocate memory for data and results', async () => {
-    const data = [
-      [1, 2, 3],
-      [4, 5, 6],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data })
-
-    expect(mockModule._malloc).toHaveBeenCalledTimes(4)
-    expect(mockModule._malloc).toHaveBeenCalledWith(6 * 4)
-    expect(mockModule._malloc).toHaveBeenCalledWith(1 * 4)
-  })
-
-  it('should free all allocated memory', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data })
-
-    expect(mockModule._free).toHaveBeenCalledTimes(4)
-  })
-
-  it('should copy input data to WASM memory', async () => {
-    const data = [
-      [1.5, 2.5],
-      [3.5, 4.5],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data })
-
+    expect(mockModule._clusterBeginRows).toHaveBeenCalledWith(2, 3)
     expect(
-      Array.from(mockModule.HEAPF32.subarray(HEAP_BASE, HEAP_BASE + 4)),
-    ).toEqual([1.5, 2.5, 3.5, 4.5])
+      Array.from(mockModule.HEAPF32.subarray(INPUT / 4, INPUT / 4 + 6)),
+    ).toEqual([1.5, 2.5, 3, 3.5, 4.5, 5])
+    expect(mockModule._clusterFree).toHaveBeenCalledWith(RUN)
   })
 
-  it('should reject a ragged row by name before touching the module', async () => {
+  it('hands a distance matrix to a matrix run untouched', async () => {
+    await hierarchicalClusterWasm({
+      distances: new Float32Array([0, 3, 0, 0]),
+    })
+    expect(mockModule._clusterBeginRows).not.toHaveBeenCalled()
+    expect(mockModule._clusterBeginMatrix).toHaveBeenCalledWith(2)
+    expect(
+      Array.from(mockModule.HEAPF32.subarray(INPUT / 4, INPUT / 4 + 4)),
+    ).toEqual([0, 3, 0, 0])
+  })
+
+  it('steps until done and builds the tree from the merges', async () => {
+    mockModule._clusterStep
+      .mockReturnValueOnce(STEP_MORE)
+      .mockReturnValueOnce(STEP_MORE)
+      .mockReturnValueOnce(STEP_DONE)
+    setMerges(
+      [0.5, 2],
+      [
+        [0, 1],
+        [0, 2],
+      ],
+    )
+    const result = await hierarchicalClusterWasm({
+      data: [[1], [1], [5]],
+      sampleLabels: ['a', 'b', 'c'],
+    })
+    expect(mockModule._clusterStep).toHaveBeenCalledTimes(3)
+    expect(Array.from(result.heights)).toEqual([0.5, 2])
+    expect(result.merges).toEqual([
+      [0, 1],
+      [0, 2],
+    ])
+    expect(result.order).toEqual([2, 0, 1])
+    expect(result.tree.height).toBe(2)
+    expect(result.tree.children?.[1]?.children?.[0]?.name).toBe('a')
+    expect(mockModule._clusterFree).toHaveBeenCalledTimes(1)
+  })
+
+  it('names leaves Sample i without labels', async () => {
+    setMerges([1], [[0, 1]])
+    const result = await hierarchicalClusterWasm({ data: twoRows })
+    expect(result.tree.children?.map(c => c.name)).toEqual([
+      'Sample 0',
+      'Sample 1',
+    ])
+  })
+
+  it('reports progress per phase at most every 100ms', async () => {
+    let clock = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    const steps: [number, number, number, number][] = [
+      [100, 0, 3, 10],
+      [150, 1, 5, 9],
+      [250, 1, 7, 9],
+    ]
+    mockModule._clusterStep.mockImplementation(() => {
+      const next = steps.shift()
+      if (!next) {
+        return STEP_DONE
+      }
+      const [time, phase, current, total] = next
+      clock = time
+      setProgress(phase, current, total)
+      return STEP_MORE
+    })
+    const onProgress = vi.fn()
+    await hierarchicalClusterWasm({ data: twoRows, onProgress })
+    expect(onProgress.mock.calls).toEqual([
+      [
+        {
+          phase: 'distance',
+          message: 'Computing distance matrix',
+          current: 3,
+          total: 10,
+        },
+      ],
+      [
+        {
+          phase: 'clustering',
+          message: 'Clustering samples',
+          current: 7,
+          total: 9,
+        },
+      ],
+    ])
+  })
+
+  it('rejects a ragged row by name before touching the module', async () => {
     await expect(
       hierarchicalClusterWasm({ data: [[1, 2], [3]] }),
     ).rejects.toThrow('row 1 has 1 columns, row 0 has 2')
-    expect(mockModule._malloc).not.toHaveBeenCalled()
+    expect(mockModule._clusterBeginRows).not.toHaveBeenCalled()
   })
 
-  it('should refuse a matrix the 2GB heap cannot hold before allocating', async () => {
+  it('refuses a matrix the 2GB heap cannot hold before allocating', async () => {
     const wide = { length: 300_000_000 }
     await expect(
       hierarchicalClusterWasm({ data: [wide, wide] }),
     ).rejects.toThrow(
       'out of memory clustering 2 samples x 300000000 columns: the input matrix needs 2.40GB and the distance matrix 0.00GB, both inside a 2.15GB wasm heap',
     )
-    expect(mockModule._malloc).not.toHaveBeenCalled()
+    expect(mockModule._clusterBeginRows).not.toHaveBeenCalled()
   })
 
-  it('should treat a null malloc as out of memory and still free the rest', async () => {
-    mockModule._malloc.mockReturnValueOnce(0)
+  it('reports a run the heap cannot supply as out of memory', async () => {
+    mockModule._clusterBeginRows.mockReturnValue(0)
+    await expect(hierarchicalClusterWasm({ data: twoRows })).rejects.toThrow(
+      /the input matrix needs 0\.00GB and the distance matrix 0\.00GB, both inside a 2\.15GB wasm heap$/,
+    )
+    expect(mockModule._clusterFree).not.toHaveBeenCalled()
+  })
+
+  it('names the runs sharing the heap when one cannot begin beside them', async () => {
+    const controller = new AbortController()
+    mockModule._clusterStep.mockReturnValue(STEP_MORE)
+    const first = hierarchicalClusterWasm({
+      data: twoRows,
+      signal: controller.signal,
+    })
+    await vi.waitFor(() => {
+      expect(mockModule._clusterStep).toHaveBeenCalled()
+    })
+    mockModule._clusterBeginRows.mockReturnValue(0)
+    await expect(hierarchicalClusterWasm({ data: twoRows })).rejects.toThrow(
+      'wasm heap, shared with 1 other clustering run in progress',
+    )
+    controller.abort()
+    await expect(first).rejects.toThrow('aborted')
+  })
+
+  it('throws on non-finite input and frees the run', async () => {
+    mockModule._clusterStep
+      .mockReturnValueOnce(STEP_MORE)
+      .mockReturnValueOnce(STEP_NON_FINITE)
+    await expect(hierarchicalClusterWasm({ data: twoRows })).rejects.toThrow(
+      'input contains non-finite values (NaN or Infinity)',
+    )
+    expect(mockModule._clusterFree).toHaveBeenCalledWith(RUN)
+  })
+
+  it('rejects an already-aborted signal without beginning a run', async () => {
+    await expect(
+      hierarchicalClusterWasm({ data: twoRows, signal: AbortSignal.abort() }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mockModule._clusterBeginRows).not.toHaveBeenCalled()
+  })
+
+  it('stops stepping and frees the run once the signal aborts', async () => {
+    const controller = new AbortController()
+    mockModule._clusterStep.mockImplementation(() => {
+      if (mockModule._clusterStep.mock.calls.length === 3) {
+        controller.abort()
+      }
+      return STEP_MORE
+    })
+    await expect(
+      hierarchicalClusterWasm({ data: twoRows, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mockModule._clusterStep).toHaveBeenCalledTimes(3)
+    expect(mockModule._clusterFree).toHaveBeenCalledWith(RUN)
+  })
+
+  it('frees the run when onProgress throws', async () => {
+    let clock = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => (clock += 200))
+    mockModule._clusterStep.mockReturnValue(STEP_MORE)
     await expect(
       hierarchicalClusterWasm({
-        data: [
-          [1, 2],
-          [3, 4],
-        ],
+        data: twoRows,
+        onProgress: () => {
+          throw new Error('listener failed')
+        },
       }),
-    ).rejects.toThrow('out of memory clustering 2 samples x 2 columns')
-    expect(mockModule._free).toHaveBeenCalledTimes(4)
+    ).rejects.toThrow('listener failed')
+    expect(mockModule._clusterFree).toHaveBeenCalledWith(RUN)
   })
 
-  it('should report both allocations when the C side runs out of memory', async () => {
-    mockModule._hierarchicalCluster.mockReturnValue(-3)
-    await expect(
-      hierarchicalClusterWasm({
-        data: [
-          [1, 2],
-          [3, 4],
-        ],
-      }),
-    ).rejects.toThrow(
-      'the input matrix needs 0.00GB and the distance matrix 0.00GB',
-    )
-  })
-
-  it('should call hierarchicalCluster with correct parameters', async () => {
-    const data = [
-      [1, 2, 3],
-      [4, 5, 6],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data })
-
-    expect(mockModule._hierarchicalCluster).toHaveBeenCalledWith(
-      expect.any(Number),
-      2,
-      3,
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-    )
-  })
-
-  it('hands a distance matrix to clusterDistanceMatrix untouched', async () => {
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-    const distances = new Float32Array([0, 3, 0, 0])
-
-    await hierarchicalClusterWasm({ distances })
-
-    expect(mockModule._hierarchicalCluster).not.toHaveBeenCalled()
-    expect(mockModule._clusterDistanceMatrix).toHaveBeenCalledWith(
-      expect.any(Number),
-      2,
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-    )
-    const ptr = mockModule._clusterDistanceMatrix.mock.calls[0]![0] as number
-    expect(
-      Array.from(mockModule.HEAPF32.subarray(ptr / 4, ptr / 4 + 4)),
-    ).toEqual([0, 3, 0, 0])
-  })
-
-  it('should propagate error thrown by checkCancellation', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    let capturedCallback: ((iter: number, total: number) => number) | undefined
-    mockModule.addFunction.mockImplementation(
-      (fn: (iter: number, total: number) => number) => {
-        capturedCallback = fn
-        return 12345
-      },
-    )
-    mockModule._hierarchicalCluster.mockImplementation(() => {
-      capturedCallback?.(1, 10)
-      return 0
-    })
-
-    const checkCancellation = vi.fn(() => {
-      throw new Error('aborted')
-    })
-
-    await expect(
-      hierarchicalClusterWasm({ data, checkCancellation }),
-    ).rejects.toThrow('aborted')
-    expect(mockModule._free).toHaveBeenCalledTimes(4)
-  })
-
-  it('should build tree from merge information', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 2
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-    const mergeAOffset = heightsOffset + (numSamples - 1)
-    const mergeBOffset = mergeAOffset + (numSamples - 1)
-
-    mockModule.HEAPF32[heightsOffset] = 1.5
-    mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeBOffset] = 1
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.tree).toBeDefined()
-    expect(result.tree.height).toBe(1.5)
-    expect(result.tree.children).toHaveLength(2)
-  })
-
-  it('should use sample labels if provided', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-    const sampleLabels = ['Sample A', 'Sample B']
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 2
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-    const mergeAOffset = heightsOffset + (numSamples - 1)
-    const mergeBOffset = mergeAOffset + (numSamples - 1)
-
-    mockModule.HEAPF32[heightsOffset] = 1.0
-    mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeBOffset] = 1
-
-    const result = await hierarchicalClusterWasm({ data, sampleLabels })
-
-    expect(result.tree.children?.[0]?.name).toBe('Sample A')
-    expect(result.tree.children?.[1]?.name).toBe('Sample B')
-  })
-
-  it('should use default labels when not provided', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 2
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-    const mergeAOffset = heightsOffset + (numSamples - 1)
-    const mergeBOffset = mergeAOffset + (numSamples - 1)
-
-    mockModule.HEAPF32[heightsOffset] = 1.0
-    mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeBOffset] = 1
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.tree.children?.[0]?.name).toBe('Sample 0')
-    expect(result.tree.children?.[1]?.name).toBe('Sample 1')
-  })
-
-  it('should return order array', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 2
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-    const mergeAOffset = heightsOffset + (numSamples - 1)
-    const mergeBOffset = mergeAOffset + (numSamples - 1)
-    const orderOffset = mergeBOffset + (numSamples - 1)
-
-    mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeBOffset] = 1
-    mockModule.HEAP32[orderOffset] = 0
-    mockModule.HEAP32[orderOffset + 1] = 1
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.order).toEqual([0, 1])
-  })
-
-  it('should return heights array', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 2
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-
-    mockModule.HEAPF32[heightsOffset] = 1.5
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.heights).toBeInstanceOf(Float32Array)
-    expect(result.heights[0]).toBe(1.5)
-  })
-
-  it('should return merges array', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 2
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-    const mergeAOffset = heightsOffset + (numSamples - 1)
-    const mergeBOffset = mergeAOffset + (numSamples - 1)
-
-    mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeBOffset] = 1
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.merges).toHaveLength(1)
-    expect(result.merges[0]).toEqual([0, 1])
-  })
-
-  it('should setup progress callback when statusCallback is provided', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-    const statusCallback = vi.fn()
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data, statusCallback })
-
-    expect(mockModule.addFunction).toHaveBeenCalled()
-    expect(mockModule._setProgressCallback).toHaveBeenCalledWith(12345)
-  })
-
-  it('should report raw counts per phase, with the distance phase flagged by a negative count', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-    const statusCallback = vi.fn()
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    let capturedCallback: ((iter: number, total: number) => number) | undefined
-    mockModule.addFunction.mockImplementation(
-      (fn: (iter: number, total: number) => number) => {
-        capturedCallback = fn
-        return 12345
-      },
-    )
-    mockModule._hierarchicalCluster.mockImplementation(() => {
-      capturedCallback?.(-3, 10)
-      capturedCallback?.(7, 9)
-      return 0
-    })
-
-    await hierarchicalClusterWasm({ data, statusCallback })
-
-    expect(statusCallback).toHaveBeenNthCalledWith(1, {
-      phase: 'distance',
-      message: 'Computing distance matrix',
-      current: 3,
-      total: 10,
-    })
-    expect(statusCallback).toHaveBeenNthCalledWith(2, {
-      phase: 'clustering',
-      message: 'Clustering samples',
-      current: 7,
-      total: 9,
-    })
-  })
-
-  it('should setup progress callback when checkCancellation is provided', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-    const checkCancellation = vi.fn()
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data, checkCancellation })
-
-    expect(mockModule.addFunction).toHaveBeenCalled()
-    expect(mockModule._setProgressCallback).toHaveBeenCalledWith(12345)
-  })
-
-  it('should cleanup progress callback after completion', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-    const statusCallback = vi.fn()
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    await hierarchicalClusterWasm({ data, statusCallback })
-
-    expect(mockModule.removeFunction).toHaveBeenCalledWith(12345)
-    expect(mockModule._setProgressCallback).toHaveBeenCalledWith(0)
-  })
-
-  it('should cleanup memory even if checkCancellation throws', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    let capturedCallback: ((iter: number, total: number) => number) | undefined
-    mockModule.addFunction.mockImplementation(
-      (fn: (iter: number, total: number) => number) => {
-        capturedCallback = fn
-        return 12345
-      },
-    )
-    mockModule._hierarchicalCluster.mockImplementation(() => {
-      capturedCallback?.(1, 10)
-      return 0
-    })
-
-    const checkCancellation = vi.fn(() => {
-      throw new Error('aborted')
-    })
-
-    await expect(
-      hierarchicalClusterWasm({ data, checkCancellation }),
-    ).rejects.toThrow()
-
-    expect(mockModule._free).toHaveBeenCalledTimes(4)
-  })
-
-  it('should cleanup callback even if checkCancellation throws', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    let capturedCallback: ((iter: number, total: number) => number) | undefined
-    mockModule.addFunction.mockImplementation(
-      (fn: (iter: number, total: number) => number) => {
-        capturedCallback = fn
-        return 12345
-      },
-    )
-    mockModule._hierarchicalCluster.mockImplementation(() => {
-      capturedCallback?.(1, 10)
-      return 0
-    })
-
-    const checkCancellation = vi.fn(() => {
-      throw new Error('aborted')
-    })
-
-    await expect(
-      hierarchicalClusterWasm({ data, checkCancellation }),
-    ).rejects.toThrow()
-
-    expect(mockModule.removeFunction).toHaveBeenCalledWith(12345)
-    expect(mockModule._setProgressCallback).toHaveBeenCalledWith(0)
-  })
-
-  it('should handle 3 samples correctly', async () => {
-    const data = [
-      [1, 2],
-      [1, 2],
-      [5, 6],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const numSamples = 3
-    const vectorSize = 2
-    const dataSize = numSamples * vectorSize
-    const heightsOffset = HEAP_BASE + dataSize
-    const mergeAOffset = heightsOffset + (numSamples - 1)
-    const mergeBOffset = mergeAOffset + (numSamples - 1)
-
-    mockModule.HEAPF32[heightsOffset] = 0.5
-    mockModule.HEAPF32[heightsOffset + 1] = 2.0
-    mockModule.HEAP32[mergeAOffset] = 0
-    mockModule.HEAP32[mergeAOffset + 1] = 0
-    mockModule.HEAP32[mergeBOffset] = 1
-    mockModule.HEAP32[mergeBOffset + 1] = 2
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.tree.children).toHaveLength(2)
-    expect(result.heights).toHaveLength(2)
-    expect(result.merges).toHaveLength(2)
-    expect(result.order).toHaveLength(3)
-  })
-
-  it('should throw for fewer than 2 samples', async () => {
+  it('throws for fewer than 2 samples', async () => {
     await expect(
       hierarchicalClusterWasm({ data: [[1, 2, 3]] }),
     ).rejects.toThrow('at least 2 samples')
   })
 
-  it('should handle two samples', async () => {
-    const data = [
-      [1, 2, 3],
-      [4, 5, 6],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
-    const result = await hierarchicalClusterWasm({ data })
-
-    expect(result.tree).toBeDefined()
-  })
-
-  it('should reuse module instance on subsequent calls', async () => {
-    const data = [
-      [1, 2],
-      [3, 4],
-    ]
-
-    mockModule.HEAPF32.fill(0)
-    mockModule.HEAP32.fill(0)
-
+  it('reuses the module instance', async () => {
     const createModuleMock = (await import('../src/wasm/distance.js')).default
-    const initialCallCount = vi.mocked(createModuleMock).mock.calls.length
-
-    await hierarchicalClusterWasm({ data })
-    await hierarchicalClusterWasm({ data })
-
-    const finalCallCount = vi.mocked(createModuleMock).mock.calls.length
-    expect(finalCallCount - initialCallCount).toBeLessThanOrEqual(1)
+    const before = vi.mocked(createModuleMock).mock.calls.length
+    await hierarchicalClusterWasm({ data: twoRows })
+    await hierarchicalClusterWasm({ data: twoRows })
+    expect(
+      vi.mocked(createModuleMock).mock.calls.length - before,
+    ).toBeLessThanOrEqual(1)
   })
 })

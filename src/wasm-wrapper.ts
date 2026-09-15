@@ -1,4 +1,5 @@
 import createClusteringModule from './wasm/distance.js'
+import { yieldToEventLoop } from './yield-task.ts'
 
 import type { ClusterNode, ClusterProgress, NumericVector } from './types.ts'
 
@@ -6,8 +7,16 @@ type ClusteringModule = Awaited<ReturnType<typeof createClusteringModule>>
 
 // MAXIMUM_MEMORY in scripts/build_wasm.sh
 const HEAP_MAX_BYTES = 2 ** 31
+const SLICE_MS = 50
+const PROGRESS_INTERVAL_MS = 100
+
+// STEP_* and PROGRESS_* in src/wasm/distance.c
+const STEP_DONE = 0
+const STEP_NON_FINITE = 2
+const PROGRESS_DISTANCE = 0
 
 let modulePromise: Promise<ClusteringModule> | null = null
+let runsInFlight = 0
 
 function getModule() {
   if (!modulePromise) {
@@ -31,10 +40,17 @@ function gigabytes(bytes: number) {
   return `${(bytes / 1e9).toFixed(2)}GB`
 }
 
-function outOfMemoryError(numSamples: number, vectorSize: number) {
+function outOfMemoryError(
+  numSamples: number,
+  vectorSize: number,
+  otherRuns = 0,
+) {
   const { data, distances } = clusteringHeapBytes(numSamples, vectorSize)
+  const sharing = otherRuns
+    ? `, shared with ${otherRuns} other clustering run${otherRuns > 1 ? 's' : ''} in progress`
+    : ''
   return new Error(
-    `out of memory clustering ${numSamples} samples x ${vectorSize} columns: the input matrix needs ${gigabytes(data)} and the distance matrix ${gigabytes(distances)}, both inside a ${gigabytes(HEAP_MAX_BYTES)} wasm heap`,
+    `out of memory clustering ${numSamples} samples x ${vectorSize} columns: the input matrix needs ${gigabytes(data)} and the distance matrix ${gigabytes(distances)}, both inside a ${gigabytes(HEAP_MAX_BYTES)} wasm heap${sharing}`,
   )
 }
 
@@ -49,19 +65,21 @@ export interface ClusteringOptions {
   data?: NumericVector[]
   distances?: Float32Array
   sampleLabels?: string[]
-  statusCallback?: (progress: ClusterProgress) => void
-  checkCancellation?: () => void
+  onProgress?: (progress: ClusterProgress) => void
+  signal?: AbortSignal
+  sliceMs?: number
 }
 
-export async function hierarchicalClusterWasm(
-  options: ClusteringOptions,
-): Promise<ClusteringResult> {
-  const { data, distances, sampleLabels, statusCallback, checkCancellation } =
-    options
-  const { numSamples, vectorSize, rows, rowStride } = describeInput(
-    data,
-    distances,
-  )
+export async function hierarchicalClusterWasm({
+  data,
+  distances,
+  sampleLabels,
+  onProgress,
+  signal,
+  sliceMs = SLICE_MS,
+}: ClusteringOptions): Promise<ClusteringResult> {
+  const input = describeInput(data, distances)
+  const { numSamples, vectorSize, rows, rowStride } = input
   if (numSamples < 2) {
     throw new Error('clusterData requires at least 2 samples')
   }
@@ -75,123 +93,97 @@ export async function hierarchicalClusterWasm(
   if (heapNeeded > HEAP_MAX_BYTES) {
     throw outOfMemoryError(numSamples, vectorSize)
   }
-
+  signal?.throwIfAborted()
   const module = await getModule()
-  const dataPtr = module._malloc(inputBytes)
-  const heightsPtr = module._malloc((numSamples - 1) * 4)
-  const mergeAPtr = module._malloc((numSamples - 1) * 4)
-  const mergeBPtr = module._malloc((numSamples - 1) * 4)
+  signal?.throwIfAborted()
 
-  let callbackPtr: number | null = null
+  const { heights, mergeA, mergeB } = await runClustering(
+    module,
+    input,
+    !!distances,
+    sliceMs,
+    onProgress,
+    signal,
+  )
+  const { tree, leafOrder } = rebuildTree(
+    numSamples,
+    heights,
+    mergeA,
+    mergeB,
+    sampleLabels,
+  )
+  const merges: [number, number][] = []
+  for (let i = 0; i < numSamples - 1; i++) {
+    merges.push([mergeA[i]!, mergeB[i]!])
+  }
+  return { tree, order: leafOrder, heights, merges }
+}
 
+async function runClustering(
+  module: ClusteringModule,
+  { numSamples, vectorSize, rows, rowStride }: ReturnType<typeof describeInput>,
+  matrixInput: boolean,
+  sliceMs: number,
+  onProgress?: (progress: ClusterProgress) => void,
+  signal?: AbortSignal,
+) {
+  const run = matrixInput
+    ? module._clusterBeginMatrix(numSamples)
+    : module._clusterBeginRows(numSamples, vectorSize)
+  if (!run) {
+    throw outOfMemoryError(numSamples, vectorSize, runsInFlight)
+  }
+  runsInFlight++
   try {
-    if (!dataPtr || !heightsPtr || !mergeAPtr || !mergeBPtr) {
-      throw outOfMemoryError(numSamples, vectorSize)
-    }
-    const heap = module.HEAPF32
+    const inputOffset = module._clusterInput(run) / 4
     for (let i = 0; i < rows.length; i++) {
-      heap.set(rows[i]!, dataPtr / 4 + i * rowStride)
+      module.HEAPF32.set(rows[i]!, inputOffset + i * rowStride)
     }
 
-    if (statusCallback || checkCancellation) {
-      const progressCallback = (iteration: number, totalIterations: number) => {
-        checkCancellation?.()
-        if (statusCallback) {
-          // the C side flags the distance-matrix phase with a negative count
-          statusCallback(
-            iteration < 0
-              ? {
-                  phase: 'distance',
-                  message: 'Computing distance matrix',
-                  current: -iteration,
-                  total: totalIterations,
-                }
-              : {
-                  phase: 'clustering',
-                  message: 'Clustering samples',
-                  current: iteration,
-                  total: totalIterations,
-                },
-          )
-        }
-        return 1
+    let lastReport = performance.now()
+    for (;;) {
+      const status = module._clusterStep(run, sliceMs)
+      if (status === STEP_DONE) {
+        break
       }
-
-      callbackPtr = module.addFunction(progressCallback, 'iii')
-      module._setProgressCallback(callbackPtr)
+      if (status === STEP_NON_FINITE) {
+        throw new Error('input contains non-finite values (NaN or Infinity)')
+      }
+      const now = performance.now()
+      if (onProgress && now - lastReport >= PROGRESS_INTERVAL_MS) {
+        lastReport = now
+        onProgress(readProgress(module, run))
+      }
+      await yieldToEventLoop()
+      signal?.throwIfAborted()
     }
 
-    const result = distances
-      ? module._clusterDistanceMatrix(
-          dataPtr,
-          numSamples,
-          heightsPtr,
-          mergeAPtr,
-          mergeBPtr,
-        )
-      : module._hierarchicalCluster(
-          dataPtr,
-          numSamples,
-          vectorSize,
-          heightsPtr,
-          mergeAPtr,
-          mergeBPtr,
-        )
-
-    if (result === -1) {
-      throw new Error('aborted')
-    }
-    if (result === -2) {
-      throw new Error('input contains non-finite values (NaN or Infinity)')
-    }
-    if (result === -3) {
-      throw outOfMemoryError(numSamples, vectorSize)
-    }
-
-    const heights = new Float32Array(numSamples - 1)
-    heights.set(
-      module.HEAPF32.subarray(heightsPtr / 4, heightsPtr / 4 + numSamples - 1),
-    )
-
-    const mergeA = new Int32Array(numSamples - 1)
-    mergeA.set(
-      module.HEAP32.subarray(mergeAPtr / 4, mergeAPtr / 4 + numSamples - 1),
-    )
-
-    const mergeB = new Int32Array(numSamples - 1)
-    mergeB.set(
-      module.HEAP32.subarray(mergeBPtr / 4, mergeBPtr / 4 + numSamples - 1),
-    )
-
-    const { tree, leafOrder } = rebuildTree(
-      numSamples,
-      heights,
-      mergeA,
-      mergeB,
-      sampleLabels,
-    )
-    const merges: [number, number][] = []
-    for (let i = 0; i < numSamples - 1; i++) {
-      merges.push([mergeA[i]!, mergeB[i]!])
-    }
-
+    const count = numSamples - 1
+    const offset = module._clusterMerges(run) / 4
     return {
-      tree,
-      order: leafOrder,
-      heights,
-      merges,
+      heights: module.HEAPF32.slice(offset, offset + count),
+      mergeA: module.HEAP32.slice(offset + count, offset + 2 * count),
+      mergeB: module.HEAP32.slice(offset + 2 * count, offset + 3 * count),
     }
   } finally {
-    if (callbackPtr !== null) {
-      module.removeFunction(callbackPtr)
-      module._setProgressCallback(0)
-    }
-
-    module._free(dataPtr)
-    module._free(heightsPtr)
-    module._free(mergeAPtr)
-    module._free(mergeBPtr)
+    runsInFlight--
+    module._clusterFree(run)
   }
+}
+
+function readProgress(module: ClusteringModule, run: number): ClusterProgress {
+  const offset = module._clusterProgress(run) / 4
+  const phase = module.HEAP32[offset]
+  const current = module.HEAP32[offset + 1]!
+  const total = module.HEAP32[offset + 2]!
+  return phase === PROGRESS_DISTANCE
+    ? {
+        phase: 'distance',
+        message: 'Computing distance matrix',
+        current,
+        total,
+      }
+    : { phase: 'clustering', message: 'Clustering samples', current, total }
 }
 
 // Either input goes to the wasm heap row by row, without a staging copy: the

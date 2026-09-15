@@ -75,7 +75,8 @@ Rows may be plain arrays or typed arrays — anything `ArrayLike<number>`.
   row.
 - No `NaN` or `Infinity`, or `clusterData` throws.
 - N×V×4 + N²×4 bytes within the 2GB wasm heap, or `clusterData` throws before
-  allocating anything.
+  allocating anything. Runs in flight at once share that heap, and one that
+  cannot fit beside the others throws saying how many there are.
 - Without `sampleLabels`, leaves come back as `Sample 0`, `Sample 1`, …
 
 ## Precomputed distances
@@ -132,21 +133,20 @@ a caller can drive a determinate progress bar off them.
 
 ## Cancellation
 
-Pass `checkCancellation: () => void` to throw and cancel:
+Pass an `AbortSignal`:
 
 ```typescript
-clusterData({
-  data,
-  checkCancellation: () => {
-    if (shouldCancel) throw new Error('cancelled')
-  },
-})
+const controller = new AbortController()
+const run = clusterData({ data, signal: controller.signal })
+controller.abort() // run rejects with the signal's reason
 ```
 
-The run calls it on the same 100ms tick as `onProgress`, so cancellation lands
-within about 100ms — and a run short enough to never report progress never
-checks at all. See [docs/cancellation.md](docs/cancellation.md) for cancelling
-from a web worker.
+The run works in slices of about 50ms and yields a task between them, so an
+abort lands within about 50ms, including one posted to a web worker as a
+message, and the run frees everything it held. A signal that has already aborted
+rejects before any work starts. Two runs in flight at once interleave slice by
+slice. See [docs/cancellation.md](docs/cancellation.md) for a worker and for how
+each environment yields.
 
 ## References
 

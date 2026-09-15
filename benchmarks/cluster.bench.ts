@@ -1,10 +1,9 @@
 // Clustering benchmarks, against src/ rather than a built branch.
 //
-// The `onProgress` cases are the point of this file. Passing a progress
-// callback registers one into the wasm module and changes which code the hot
-// loop runs, and every benchmark written before this one omitted it — so a
-// change that made the callback path 2.5x slower than the bare path measured
-// clean and shipped (ac57be9). JBrowse always passes onProgress. Benchmark the
+// The `onProgress` cases are the point of this file. A progress callback once
+// changed which code the hot loop ran, and every benchmark before this one
+// omitted it, so a 2.5x slowdown on the callback path measured clean and
+// shipped (ac57be9). JBrowse passes onProgress and a signal. Benchmark the
 // configuration the caller actually uses, not the default arguments.
 //
 // The tied case matters for the same reason: cached-neighbour invalidation
@@ -44,6 +43,7 @@ function tied(n: number) {
 }
 
 const opts = { iterations: 5, warmupIterations: 2 }
+const { signal } = new AbortController()
 
 for (const n of [500, 1500]) {
   describe(`continuous n=${n}`, () => {
@@ -56,9 +56,9 @@ for (const n of [500, 1500]) {
       opts,
     )
     bench(
-      'onProgress',
+      'onProgress + signal',
       async () => {
-        await clusterData({ data, onProgress: () => {} })
+        await clusterData({ data, onProgress: () => {}, signal })
       },
       opts,
     )
@@ -74,9 +74,9 @@ for (const n of [500, 1500]) {
       opts,
     )
     bench(
-      'onProgress',
+      'onProgress + signal',
       async () => {
-        await clusterData({ data, onProgress: () => {} })
+        await clusterData({ data, onProgress: () => {}, signal })
       },
       opts,
     )
@@ -103,9 +103,9 @@ function genotypes(n: number, v: number) {
 describe('wide n=500 v=3000', () => {
   const data = genotypes(500, 3000)
   bench(
-    'onProgress',
+    'onProgress + signal',
     async () => {
-      await clusterData({ data, onProgress: () => {} })
+      await clusterData({ data, onProgress: () => {}, signal })
     },
     opts,
   )

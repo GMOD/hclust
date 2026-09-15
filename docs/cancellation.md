@@ -1,44 +1,51 @@
 # Cancelling from a web worker
 
-`checkCancellation` runs synchronously, from inside the WASM call. That is what
-lets it stop the run, and also what breaks the obvious worker design: clustering
-blocks the worker, so a `cancel` message sent with `postMessage` sits in the
-event queue until the run it meant to interrupt has already finished.
-
-The worker has to read the signal without returning to the event loop. Two ways:
-
-## SharedArrayBuffer + Atomics
-
-The direct approach, and the one to use when you have it. The page writes a flag
-into shared memory; the worker reads it synchronously mid-run.
+`clusterData` works in slices of about 50ms and yields one task between them, so
+a worker can abort a run from a posted message:
 
 ```typescript
-// main thread
-const flag = new Int32Array(new SharedArrayBuffer(4))
-worker.postMessage({ data, flag })
-// later
-Atomics.store(flag, 0, 1)
-
 // worker
-clusterData({
-  data,
-  checkCancellation: () => {
-    if (Atomics.load(flag, 0)) throw new Error('cancelled')
-  },
-})
+let controller: AbortController | undefined
+
+self.onmessage = async ({ data: message }) => {
+  if (message.type === 'cancel') {
+    controller?.abort()
+    return
+  }
+  controller = new AbortController()
+  try {
+    const { order } = await clusterData({
+      data: message.rows,
+      signal: controller.signal,
+    })
+    self.postMessage({ type: 'done', order })
+  } catch (error) {
+    self.postMessage({ type: 'failed', message: String(error) })
+  }
+}
 ```
 
-`SharedArrayBuffer` requires cross-origin isolation — serve the document with
-`Cross-Origin-Opener-Policy: same-origin` and
-`Cross-Origin-Embedder-Policy: require-corp`, which also constrains what
-third-party resources the page can embed.
+The run rejects with `signal.reason`, a `DOMException` named `AbortError` unless
+the caller passed its own, and frees its wasm allocations before it does. In
+headless Chrome 153, an abort posted to a worker ended a 4.1s run 1–55ms after
+the page sent it.
 
-## Blob URL + synchronous XHR
+## How each environment yields
 
-The fallback when you cannot set those headers. Workers may issue a synchronous
-`XMLHttpRequest` where the main thread may not, so the worker can poll an
-endpoint the page controls and block on the answer.
+The abort only lands if the task the run yields to lets a posted message or a
+timer run first.
 
-This costs a network round trip per check, so poll a cached local value and only
-hit the endpoint every so often rather than on every `checkCancellation` call.
-Prefer the `Atomics` version wherever you can set the headers.
+- **Browsers, workers, Electron**: a `MessageChannel` task. Not
+  `scheduler.yield()`: Chromium runs its continuation ahead of posted messages,
+  and a worker loop yielding that way every 50ms ran 3.3s past an abort to
+  completion, where the `MessageChannel` loop stopped within 23ms.
+- **Node**: `setImmediate`. A MessagePort turn in Node runs no due timer, so a
+  test that aborts from a `setTimeout` would never see it; `setImmediate` passes
+  through the timers phase without `setTimeout`'s 1ms clamp.
+- **jsdom under jest**: `setTimeout(0)`, since that environment removes
+  `setImmediate`.
+
+The run yields whether or not it has a signal. The task costs far less than the
+slice it follows, and it keeps a worker answering other messages, including a
+second clustering run, which interleaves with the first rather than queueing
+behind it.

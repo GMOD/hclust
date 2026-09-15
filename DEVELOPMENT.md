@@ -75,7 +75,8 @@ src/
 │   ├── distance.c          # C source for WASM
 │   ├── distance.js         # Emscripten output, WASM inlined as base64 (tracked)
 │   └── distance.d.ts       # Hand-written types for the bundle above
-├── wasm-wrapper.ts         # TypeScript wrapper for WASM
+├── wasm-wrapper.ts         # TypeScript wrapper for WASM: steps a run, yields, aborts
+├── yield-task.ts           # The task a run yields to between slices
 ├── cluster.ts              # Main clustering algorithm
 ├── tree-utils.ts           # Tree output formatting
 ├── types.ts                # TypeScript type definitions

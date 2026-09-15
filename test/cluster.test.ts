@@ -35,8 +35,8 @@ describe('clusterData', () => {
     expect(hierarchicalClusterWasm).toHaveBeenCalledWith({
       data,
       sampleLabels: undefined,
-      statusCallback: undefined,
-      checkCancellation: undefined,
+      onProgress: undefined,
+      signal: undefined,
     })
 
     expect(result.tree).toEqual(mockWasmResult.tree)
@@ -56,8 +56,8 @@ describe('clusterData', () => {
       data: undefined,
       distances,
       sampleLabels: ['a', 'b'],
-      statusCallback: undefined,
-      checkCancellation: undefined,
+      onProgress: undefined,
+      signal: undefined,
     })
     expect(result.order).toEqual([1, 0])
     expect(result.clustersGivenK).toEqual([[[0, 1]], [[0], [1]]])
@@ -91,8 +91,8 @@ describe('clusterData', () => {
     expect(hierarchicalClusterWasm).toHaveBeenCalledWith({
       data,
       sampleLabels,
-      statusCallback: undefined,
-      checkCancellation: undefined,
+      onProgress: undefined,
+      signal: undefined,
     })
   })
 
@@ -119,12 +119,12 @@ describe('clusterData', () => {
     })
     expect(hierarchicalClusterWasm).toHaveBeenCalledWith(
       expect.objectContaining({
-        statusCallback: onProgress,
+        onProgress,
       }),
     )
   })
 
-  it('should pass checkCancellation callback to wasm wrapper', async () => {
+  it('should pass the abort signal to wasm wrapper', async () => {
     const mockWasmResult = {
       tree: { name: 'Root', height: 0 },
       order: [0],
@@ -134,14 +134,14 @@ describe('clusterData', () => {
 
     vi.mocked(hierarchicalClusterWasm).mockResolvedValue(mockWasmResult)
 
-    const checkCancellation = vi.fn()
+    const { signal } = new AbortController()
     const data = [[1, 2]]
 
-    await clusterData({ data, checkCancellation })
+    await clusterData({ data, signal })
 
     const calls = vi.mocked(hierarchicalClusterWasm).mock.calls
     const call = calls[calls.length - 1]?.[0]
-    expect(call?.checkCancellation).toBe(checkCancellation)
+    expect(call?.signal).toBe(signal)
   })
 
   it('should build clustersGivenK correctly for 2 samples', async () => {
@@ -270,17 +270,14 @@ describe('clusterData', () => {
     ).toHaveLength(4)
   })
 
-  it('should propagate error thrown by checkCancellation', async () => {
+  it('should propagate an abort from the wasm wrapper', async () => {
     vi.mocked(hierarchicalClusterWasm).mockRejectedValue(new Error('aborted'))
 
-    const checkCancellation = vi.fn(() => {
-      throw new Error('aborted')
-    })
     const data = [[1, 2]]
 
-    await expect(clusterData({ data, checkCancellation })).rejects.toThrow(
-      'aborted',
-    )
+    await expect(
+      clusterData({ data, signal: AbortSignal.abort() }),
+    ).rejects.toThrow('aborted')
   })
 })
 
@@ -315,8 +312,8 @@ describe('clusterObject', () => {
         [3, 4],
       ],
       sampleLabels: ['A', 'B'],
-      statusCallback: undefined,
-      checkCancellation: undefined,
+      onProgress: undefined,
+      signal: undefined,
     })
   })
 })
