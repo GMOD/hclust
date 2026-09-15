@@ -160,5 +160,5 @@ All three read the bundled 1000 Genomes slice in `benchmarks/data/` (2504
 samples, 1 Mb of chr22) through `scripts/real-matrices.mjs`, with no tools
 beyond node. `bench:generations` also needs a host `cc`, not emscripten.
 `bench:greenelab` installs its baseline into a gitignored `build/` on first run
-and takes the better part of an hour over every case; pass case indices to run a
-subset. `bench:real` takes a couple of minutes.
+and takes about an hour over every case; pass case indices to run a subset.
+`bench:real` takes a couple of minutes.

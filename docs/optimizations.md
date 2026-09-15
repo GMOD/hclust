@@ -1,8 +1,15 @@
 # How this got fast
 
-Clustering 2,000 samples took 71 seconds when JBrowse first shipped it and takes
-0.1 seconds now — **446× faster** as of step 5, and the kernel has moved since.
-This is what changed, in order. Every number is measured; see
+Clustering the 2,504 samples of 1000 Genomes by genotype over a 100 kb window —
+3,105 variant columns — took 94 seconds with the JavaScript library JBrowse
+first shipped and takes 2.3 seconds now, **41× faster**. The ratio depends on
+the window: the merge loop went from most of a minute to a fraction of a second,
+but the distance build got under 10× faster, and the wider the window the more
+of the run it is. Across the windows in [Results](#results) the end-to-end gain
+runs from 8× at 22,513 columns, nearly all distance build, to 93× for 5,008
+haplotypes at 2,311 columns, where greenelab's merge is most of its run.
+
+This is what changed, in order. Every number is measured on real genotypes; see
 [Methodology](#methodology).
 
 ## Where it started: greenelab/hclust
@@ -35,10 +42,11 @@ over `|A| × |B|` member pairs per candidate pair per iteration — but with poi
 distances in a flat `float32[N × N]` matrix and member lists in flat `int`
 arrays.
 
-**2000 samples: 71.4s → 17.6s (4.1×).** Purely a constant factor: the same ~N³/2
-lookups, each now one contiguous float read. The rest was structural — per merge
-it `malloc`s an index array, `memcpy`s both children in, frees both, then
-compacts the cluster array by shifting everything past the two removed.
+**2504 × 3105: 94 s → 27 s (3.4×)**, greenelab in node against the port compiled
+natively. Purely a constant factor: the same ~N³/2 lookups, each now one
+contiguous float read. The rest was structural — per merge it `malloc`s an index
+array, `memcpy`s both children in, frees both, then compacts the cluster array
+by shifting everything past the two removed.
 
 ## 2. Lance-Williams, stable slots, active list
 
@@ -66,7 +74,7 @@ and derive `clustersGivenK` from the merge sequence alone.
 so scans iterate `k` live clusters instead of filtering N slots through a flag
 array.
 
-**2000 samples: 17.6s → 3.5s (5.0×).**
+**2504 × 3105: 27.4 s → 8.7 s (3.1×).**
 
 ## 3. Correctness work
 
@@ -87,7 +95,7 @@ constrains what later optimizations may do:
 
 _`e6ed69e`, Aug 2026._
 
-After step 2 the find-minimum pass was the whole runtime — `k²/2` reads per
+After step 2 the find-minimum pass was the whole merge loop — `k²/2` reads per
 iteration, O(N³) overall — beside an O(N) Lance-Williams update.
 
 The pass finds one pair, so cache one candidate per cluster instead. `nn[i]`
@@ -101,7 +109,11 @@ candidates is equivalent to minimising over all pairs: for fixed `i` the
 combined size is `sizes[i] + sizes[j]` and `sizes[i]` is constant while choosing
 `j`, so `i`'s best partner under the pair ordering is exactly `nn[i]`.
 
-**2000 samples: 3.5s → 0.083s (42×).**
+**2504 × 3105: 8.7 s → 4.9 s (1.8×).** The merge loop all but vanished, and what
+is left is the distance build, still step 1's scalar all-double kernel. At 2,357
+columns the same generation takes 3.6 s: 74% of the time for 76% of the columns,
+the proportionality of a run that is all distance build. Steps 6 and 7 go after
+that.
 
 One behavioural change came with it. Pairs tied on _both_ distance and combined
 size used to fall to `activeList` order, which swap-with-last removal leaves
@@ -113,14 +125,12 @@ unchanged.
 
 _`ac57be9`, Aug 2026._
 
-Every benchmark above ran without a progress callback, which hid the largest
-cost on the path JBrowse actually uses. With `onProgress` registered, the
-distance-matrix loop called `emscripten_get_now()` — a wasm→JS call — once per
-pair, purely to check whether 100ms had elapsed. The guard cost several times
-more than the distance it guarded.
-
-**5000 samples: 464ms without a callback, 1063ms with one**, for nine progress
-reports. Polling the clock every 1024th pair puts that back to 1.0×.
+Every benchmark of the time ran without a progress callback, which hid the
+largest cost on the path JBrowse actually uses. With `onProgress` registered,
+the distance-matrix loop called `emscripten_get_now()` — a wasm→JS call — once
+per pair, purely to check whether 100ms had elapsed. The guard cost several
+times more than the distance it guarded, and more than doubled the call. Polling
+the clock every 1024th pair removed the cost.
 
 A benchmark that omits an optional argument is not benchmarking the caller's
 configuration. `benchmarks/cluster.bench.ts` now runs both paths, so the next
@@ -128,12 +138,12 @@ divergence shows up as a number rather than a bug report.
 
 ## 6. Real widths, and the first call
 
-_Aug 2026._ Everything above was measured at V = 20 columns, where the merge
-loop is the cost. JBrowse hands over one column per variant site in the window,
-which on a 1000 Genomes window at the default filters is 2,000 to 22,000
-columns; there the distance build is 97 to 100% of the run and the merge loop is
-~40 ms. `pnpm bench:real` runs that regime on a bundled slice of real genotypes
-(`benchmarks/data/`), each case in a fresh process.
+_Aug 2026._ Steps 1 to 5 were developed against 20-column synthetic data, where
+the merge loop is the cost. JBrowse hands over one column per variant site in
+the window, which on a 1000 Genomes window at the default filters is 2,000 to
+22,000 columns; there the distance build is 97 to 100% of the run and the merge
+loop is ~40 ms. `pnpm bench:real` runs that regime on a bundled slice of real
+genotypes (`benchmarks/data/`), each case in a fresh process.
 
 The fresh process is the point. The first `clusterData` call in a process ran
 the distance build at 1.05 G pair-elements/s and every later one at 1.95; node
@@ -165,35 +175,44 @@ and this one does not. On every real matrix checked, merges, heights and leaf
 order are bit-identical to the all-double kernel, and the v3.0.4 snapshots pass
 unchanged.
 
-**2504 × 3106: 7.0s → 2.8s (2.5×)**; 1.45 → 3.5 G pair-elements/s. The V = 20
-regime moved from 152 to ~100 ms at N = 2000, most of it the same kernel.
+**2504 × 3106: 7.0s → 2.8s (2.5×)**; 1.45 → 3.5 G pair-elements/s.
 
 ## Results
 
-Three C generations, same data, same binary, best of 3 runs (ms):
+End to end, greenelab/hclust against the shipped build, through WebAssembly,
+each a first call in a fresh process:
 
-| N    | 1. C port | 2. Lance-Williams | 4. cached NN | 1 → 4 |
-| ---- | --------: | ----------------: | -----------: | ----: |
-| 250  |       132 |                11 |            6 |   22× |
-| 500  |       367 |                38 |            7 |   52× |
-| 1000 |     1,477 |               217 |           19 |   78× |
-| 1500 |     5,310 |               987 |           38 |  140× |
-| 2000 |    17,608 |             3,524 |           83 |  212× |
+| Case                              | N × V        | greenelab | current | speedup |
+| --------------------------------- | ------------ | --------: | ------: | ------: |
+| 100 kb window, MAF 0, samples     | 2504 × 3105  |    93.7 s |  2.29 s |     41× |
+| 100 kb window, MAF 0, haplotypes  | 5008 × 3098  |   831.1 s |  16.6 s |     50× |
+| 1 Mb window, MAF 0.05, samples    | 2504 × 2357  |    89.0 s |  1.75 s |     51× |
+| 1 Mb window, MAF 0.05, haplotypes | 5008 × 2311  |   758.5 s |  8.16 s |     93× |
+| 1 Mb window, MAF 0, samples       | 2504 × 22513 |   251.7 s |  30.5 s |      8× |
+| 1 Mb window, MAF 0, haplotypes    | 5008 × 22382 |  1177.4 s |  73.6 s |     16× |
 
-Doubling N from 1000 to 2000 costs 11.9× in the first column and 16× in the
-second — both cubic-ish — against 4.4× in the third, which is what quadratic
-looks like.
+Two costs set the ratio. greenelab's merge is O(N³) and ignores the columns, so
+it dominates the narrow windows, where doubling the rows costs greenelab about
+9×; there the speedup is the merge's, and it is largest. The distance build is
+O(N²V) in both, and here only kernel and runtime separate them, so the
+22,513-column samples window, nearly all distance build in both, sits near that
+phase's own ratio.
 
-End to end, greenelab/hclust against the shipped build (through WebAssembly, not
-native):
+Three C generations, compiled natively, same matrices, best of 3 runs (ms):
 
-| N    | greenelab (ms) | current (ms) | speedup |
-| ---- | -------------: | -----------: | ------: |
-| 250  |            119 |            2 |     60× |
-| 500  |            721 |            6 |    120× |
-| 1000 |          6,656 |           21 |    317× |
-| 1500 |         28,331 |           53 |    535× |
-| 2000 |         71,365 |          160 |    446× |
+| N × V       | 1. C port | 2. Lance-Williams | 4. cached NN | 1 → 4 |
+| ----------- | --------: | ----------------: | -----------: | ----: |
+| 2504 × 3105 |    27,442 |             8,729 |        4,861 |  5.6× |
+| 2504 × 2357 |    23,819 |             6,567 |        3,588 |  6.6× |
+
+Generation 4 is the distance build of step 1 with the merge loop nearly gone;
+steps 6 and 7 are wasm-specific and have no native column.
+
+Both tables come from an i9-9880H laptop running Linux while other work
+intermittently shared the CPU (load average 1 to 6 on 8 cores), so absolute
+times read high: the idle `bench:real` run below, on an i9-9980HK, has the
+22,513-column samples case at 23.0 s rather than 30.5 s. Treat the ratios as the
+claim, to within tens of percent.
 
 Real genotypes at JBrowse's widths, `pnpm bench:real`, before and after steps 6
 and 7, on the same machine in one sitting (ms → s):
@@ -218,69 +237,64 @@ across the board and was discarded.
 
 **Tied input gets much less of this.** Cached-neighbour invalidation is the weak
 spot: when many clusters share a nearest neighbour, one merge invalidates many
-entries and each rescans. On data with many identical rows the gain over step 2
-is ~2–3× rather than ~40× — and that is the sparse-coverage-vector shape, so
-real genomic input often lands near the low end.
+entries and each rescans. Data with many identical rows — sparse coverage
+vectors, genotypes over a narrow window — gains far less from step 4 than
+continuous data does.
 
 **Memory is the ceiling, not time.** The distance matrix is a full N×N float32:
 400MB at N=10,000, 1.6GB at N=20,000, against a 2GB heap cap (`MAXIMUM_MEMORY`
-in `scripts/build_wasm.sh`). N=20,000 clusters in 18.2s; N=24,000 fails the
-allocation, reporting the size it could not get rather than the "aborted" it
-used to claim. Storing only the upper triangle would halve the matrix and
-roughly double that ceiling, at the cost of a strided access — the merge loop
-reads both `[i][j]` and the mirrored `[j][i]`.
+in `scripts/build_wasm.sh`). N=20,000 fits; N=24,000 fails the allocation,
+reporting the size it could not get rather than the "aborted" it used to claim.
+Storing only the upper triangle would halve the matrix and roughly double that
+ceiling, at the cost of a strided access — the merge loop reads both `[i][j]`
+and the mirrored `[j][i]`.
 
-**The distance matrix build is the run at real widths.** At V = 20 it was ~40%
-(828ms of 2.3s at N=10,000); at the thousands of columns JBrowse hands over it
-is 97 to 100%, and step 7's kernel is the state of that: `f32x4` subtract and
-square, `f64x2` accumulate every 16 elements, ~3.5 G pair-elements/s single
-threaded. What is left is memory-level parallelism and the GPU. A compute shader
-doing the same Euclidean build, one thread per pair with no tiling, ran 6 to 12×
-faster than the step 7 kernel (12 to 19× faster than 5.0.0) on the bundled 1000
-Genomes matrices (measured in jbrowse-components,
-`browser-tests/probe-gpu-distance-matrix.ts`). `clusterData({ distances })`
-takes that matrix and runs only the merge loop on it; the build here writes the
-upper triangle and the merge entry mirrors it, so a producer fills the same
-half. That entry made the merge loop the whole call, and step 6's tiering
-problem showed up again: as one long call it stayed in V8's baseline tier, 285
-ms at N = 2504 on the first call against ~100 ms warm. Each merge is now its own
-function, `mergeStep`, and the first call is 155 ms.
+**The distance matrix build is the run at real widths.** At the thousands of
+columns JBrowse hands over it is 97 to 100%, and step 7's kernel is the state of
+that: `f32x4` subtract and square, `f64x2` accumulate every 16 elements, ~3.5 G
+pair-elements/s single threaded. What is left is memory-level parallelism and
+the GPU. A compute shader doing the same Euclidean build, one thread per pair
+with no tiling, ran 6 to 12× faster than the step 7 kernel (12 to 19× faster
+than 5.0.0) on the bundled 1000 Genomes matrices (measured in
+jbrowse-components, `browser-tests/probe-gpu-distance-matrix.ts`).
+`clusterData({ distances })` takes that matrix and runs only the merge loop on
+it; the build here writes the upper triangle and the merge entry mirrors it, so
+a producer fills the same half. That entry made the merge loop the whole call,
+and step 6's tiering problem showed up again: as one long call it stayed in V8's
+baseline tier, 285 ms at N = 2504 on the first call against ~100 ms warm. Each
+merge is now its own function, `mergeStep`, and the first call is 155 ms.
 
 ## Methodology
 
-Both tables regenerate:
+All three tables regenerate:
 
 ```
 pnpm bench:generations   # the three C generations
 pnpm bench:greenelab     # greenelab vs the shipped wasm
+pnpm bench:real          # the shipped wasm, first call and warm
 ```
 
-Data is `data[i][j] = sin(i·31 + j·7) × 100` with `V = 20`, generated
-identically in C and JS. Pass sizes as arguments to either script; the defaults
-are the rows above, and greenelab takes about 100 seconds to get through them.
+Every one reads the same input. `scripts/real-matrices.mjs` parses the bundled
+VCF with node alone and builds matrices the way `plugins/variants` in
+jbrowse-components does: one column per ALT allele, dosage scaled to 2/called,
+no-calls imputed to the site mean, one 0/1 row per haplotype in phased mode.
+Pass case indices to `bench:generations` or `bench:greenelab` to choose windows.
 
-`bench:real` parses the bundled VCF with node alone, builds matrices the way
-`plugins/variants` in jbrowse-components does (one column per ALT allele, dosage
-scaled to 2/called, no-calls imputed to the site mean, one 0/1 row per haplotype
-in phased mode), and spawns a child process per case so the first call is a real
-first call.
+`bench:real` spawns a child process per case so the first call is a real first
+call.
 
 `bench:generations` compiles each generation from the commit that introduced it
 (`25fb205`, `c896acb`, `e6ed69e`) with `cc -O2` and a stub `emscripten.h`,
 renaming its two exported symbols so all three link into one harness and run
 against the same buffers in the same process. Best of 3 per cell — run it on AC
-power, since CPU scaling made the first attempt at these numbers non-monotonic
-in N.
+power. It defaults to the two 2504-sample windows narrow enough for generation 1
+to finish a run in under a minute.
 
 `bench:greenelab` installs `@greenelab/hclust@0.0.1` into a gitignored `build/`
-and calls it with its progress callback stubbed out. Those are single runs, and
-JS-vs-native is not like-for-like — which is why the column beside it goes
-through WebAssembly rather than the C harness. Treat that table as
-order-of-magnitude.
-
-Absolute milliseconds belong to the machine: a re-run on different hardware
-(Aug 2026) reproduced every ratio and the scaling with times 1.3–1.5× lower
-throughout. The ratios are the claim.
+and calls it with its progress callback stubbed out. Each implementation runs
+each case once, in its own fresh process, so both are first calls. It takes
+about an hour over every case, most of it greenelab's merge on the 5,008-row
+windows.
 
 Generations 2 and 4 got an equivalence check: 28 datasets spanning continuous,
 integer, all-zero and sparse-duplicate input, compared merge-for-merge and
