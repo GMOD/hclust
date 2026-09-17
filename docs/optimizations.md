@@ -9,7 +9,7 @@ of the run it is. Across the windows in [Results](#results) the end-to-end gain
 runs from 8× at 22,513 columns, nearly all distance build, to 93× for 5,008
 haplotypes at 2,311 columns, where greenelab's merge is most of its run.
 
-This is what changed, in order. Every number is measured on real genotypes; see
+The changes follow, in order. Every number is measured on real genotypes; see
 [Methodology](#methodology).
 
 ## Where it started: greenelab/hclust
@@ -60,15 +60,15 @@ distance to every other cluster from its children's existing distances:
 d(A∪B, k) = (|A|·d(A,k) + |B|·d(B,k)) / (|A| + |B|)
 ```
 
-So the matrix _maintains_ cluster-to-cluster distances instead of recomputing
-them from members. A merge costs O(k) updates, and a find-minimum pass becomes
-`k²/2` float reads rather than `N²/2` — a term that finally shrinks as clusters
-merge, ~N³/6 total.
+The recurrence lets the matrix _maintain_ cluster-to-cluster distances instead
+of recomputing them from members. A merge costs O(k) updates, and a find-minimum
+pass becomes `k²/2` float reads rather than `N²/2` — a term that finally shrinks
+as clusters merge, ~N³/6 total.
 
 **Stable slot ids.** A merged cluster reuses the lower of the two slot indices
 instead of appending and compacting. No index arrays to copy, no shifting, and
-`mergeA[i] < mergeB[i]` always — which is what lets the JS side rebuild the tree
-and derive `clustersGivenK` from the merge sequence alone.
+`mergeA[i] < mergeB[i]` always, letting the JS side rebuild the tree and derive
+`clustersGivenK` from the merge sequence alone.
 
 **Active-index list.** Swap-with-last removal keeps the live slots contiguous,
 so scans iterate `k` live clusters instead of filtering N slots through a flag
@@ -89,7 +89,7 @@ constrains what later optimizations may do:
 - **Numerical stability** (`388be72`). Distances and Lance-Williams weights
   accumulate in `double`, because N−1 chained float32 updates drift. Merge
   heights clamp to non-decreasing along any root-ward path, since rounding could
-  otherwise invert a near-tie and surface as a negative branch length.
+  otherwise invert a near-tie and produce a negative branch length.
 
 ## 4. Cached nearest neighbours
 
@@ -109,10 +109,10 @@ candidates is equivalent to minimising over all pairs: for fixed `i` the
 combined size is `sizes[i] + sizes[j]` and `sizes[i]` is constant while choosing
 `j`, so `i`'s best partner under the pair ordering is exactly `nn[i]`.
 
-**2504 × 3105: 8.7 s → 4.9 s (1.8×).** The merge loop all but vanished, and what
-is left is the distance build, still step 1's scalar all-double kernel. At 2,357
-columns the same generation takes 3.6 s: 74% of the time for 76% of the columns,
-the proportionality of a run that is all distance build. Steps 6 and 7 go after
+**2504 × 3105: 8.7 s → 4.9 s (1.8×).** The merge loop all but vanished, leaving
+the distance build — still step 1's scalar all-double kernel. At 2,357 columns
+the same generation takes 3.6 s: 74% of the time for 76% of the columns, the
+proportionality of a run that is all distance build. Steps 6 and 7 go after
 that.
 
 One behavioural change came with it. Pairs tied on _both_ distance and combined
@@ -132,9 +132,9 @@ per pair, purely to check whether 100ms had elapsed. The guard cost several
 times more than the distance it guarded, and more than doubled the call. Polling
 the clock every 1024th pair removed the cost.
 
-A benchmark that omits an optional argument is not benchmarking the caller's
-configuration. `benchmarks/cluster.bench.ts` now runs both paths, so the next
-divergence shows up as a number rather than a bug report.
+A benchmark that omits an optional argument measures a different configuration
+than the caller's. `benchmarks/cluster.bench.ts` now runs both paths, so the
+next divergence shows up as a number rather than a bug report.
 
 ## 6. Real widths, and the first call
 
@@ -145,15 +145,14 @@ the window, which on a 1000 Genomes window at the default filters is 2,000 to
 loop is ~40 ms. `pnpm bench:real` runs that regime on a bundled slice of real
 genotypes (`benchmarks/data/`), each case in a fresh process.
 
-The fresh process is the point. The first `clusterData` call in a process ran
+A fresh process per case matters: the first `clusterData` call in a process ran
 the distance build at 1.05 G pair-elements/s and every later one at 1.95; node
 `--no-liftoff` closed the gap. V8 promotes a wasm function out of its Liftoff
 baseline tier on call count and has no on-stack replacement, and
 `hierarchicalCluster` did the whole build in one call, so the first call stayed
-baseline to the end. A best-of-N benchmark in one process is exactly the
-configuration that hides this, the same way omitting the callback hid step 5.
-Chrome tiers the same way, and the first clustering in a JBrowse worker is the
-one the user is waiting on.
+baseline to the end. A best-of-N benchmark in one process hides this, the same
+way omitting the callback hid step 5. Chrome tiers the same way, and the first
+clustering in a JBrowse worker is the one the user is waiting on.
 
 The per-row work moved into its own function, `distanceRowChunk`, called once
 per 256 pairs. Call count promotes it a few thousand calls in, and the outer
@@ -169,10 +168,10 @@ it ran at `f64x2` width: two elements per operation. Now the subtract and square
 are `f32x4` and the promotion to `f64x2` happens every 16 elements, after a
 pairwise add of four vectors, so a float lane never sums more than four
 non-negative terms before reaching the double accumulator. That bounds the
-relative error at a few float ulps independent of V, which is what step 3 was
-protecting against: a plain float32 sum's error grows with the vector length,
-and this one does not. On every real matrix checked, merges, heights and leaf
-order are bit-identical to the all-double kernel, and the v3.0.4 snapshots pass
+relative error at a few float ulps independent of V — the failure mode step 3
+guarded against: a plain float32 sum's error grows with the vector length, and
+this one does not. On every real matrix checked, merges, heights and leaf order
+are bit-identical to the all-double kernel, and the v3.0.4 snapshots pass
 unchanged.
 
 **2504 × 3106: 7.0s → 2.8s (2.5×)**; 1.45 → 3.5 G pair-elements/s.
@@ -235,25 +234,25 @@ across the board and was discarded.
 
 ## What still costs
 
-**Tied input gets much less of this.** Cached-neighbour invalidation is the weak
+Tied input gets much less of this. Cached-neighbour invalidation is the weak
 spot: when many clusters share a nearest neighbour, one merge invalidates many
 entries and each rescans. Data with many identical rows — sparse coverage
 vectors, genotypes over a narrow window — gains far less from step 4 than
 continuous data does.
 
-**Memory is the ceiling, not time.** The distance matrix is a full N×N float32:
+Memory is the ceiling, not time. The distance matrix is a full N×N float32:
 400MB at N=10,000, 1.6GB at N=20,000, against a 2GB heap cap (`MAXIMUM_MEMORY`
 in `scripts/build_wasm.sh`). N=20,000 fits; N=24,000 fails the allocation,
-reporting the size it could not get rather than the "aborted" it used to claim.
-Storing only the upper triangle would halve the matrix and roughly double that
-ceiling, at the cost of a strided access — the merge loop reads both `[i][j]`
-and the mirrored `[j][i]`.
+reporting the size it could not get rather than a bare "aborted". Storing only
+the upper triangle would halve the matrix and roughly double that ceiling, at
+the cost of a strided access — the merge loop reads both `[i][j]` and the
+mirrored `[j][i]`.
 
-**The distance matrix build is the run at real widths.** At the thousands of
-columns JBrowse hands over it is 97 to 100%, and step 7's kernel is the state of
-that: `f32x4` subtract and square, `f64x2` accumulate every 16 elements, ~3.5 G
-pair-elements/s single threaded. What is left is memory-level parallelism and
-the GPU. A compute shader doing the same Euclidean build, one thread per pair
+The distance matrix build is the run at real widths. At the thousands of columns
+JBrowse hands over it is 97 to 100%, and step 7's kernel is the state of that:
+`f32x4` subtract and square, `f64x2` accumulate every 16 elements, ~3.5 G
+pair-elements/s single threaded. Only memory-level parallelism and the GPU
+remain. A compute shader doing the same Euclidean build, one thread per pair
 with no tiling, ran 6 to 12× faster than the step 7 kernel (12 to 19× faster
 than 5.0.0) on the bundled 1000 Genomes matrices (measured in
 jbrowse-components, `browser-tests/probe-gpu-distance-matrix.ts`).

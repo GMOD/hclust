@@ -1,7 +1,7 @@
 # Newick output
 
 `toNewick` writes a cluster's merge height as the `:` branch length above it,
-which is what every other reader of the format expects:
+matching what every other reader of the format expects:
 
 ```js
 toNewick({
@@ -22,10 +22,10 @@ toNewick({
 // '((A:1.0000,B:1.0000):1.0000,C:2.0000)'
 ```
 
-The absolute heights survive the trip. UPGMA is monotonic —
-`src/wasm/distance.c` clamps the tiny inversions repeated Lance-Williams updates
-produce on near-tied data — so a node's height is the root's minus the lengths
-on the path down to it, and `fromNewick` recovers them that way:
+Absolute heights round-trip exactly. UPGMA is monotonic — `src/wasm/distance.c`
+clamps the tiny inversions repeated Lance-Williams updates produce on near-tied
+data — so a node's height is the root's minus the lengths on the path down to
+it, and `fromNewick` recovers them that way:
 
 ```js
 fromNewick('((A:1.0000,B:1.0000):1.0000,C:2.0000)')
@@ -46,13 +46,13 @@ Through v4 `toNewick` put the height in the internal node's _label_ instead:
 ((A,B)1.0000,C)2.0000
 ```
 
-That is a legal Newick string, and nothing rejects it. It is also read as
-something else entirely by every mainstream viewer: a numeric internal label is
-a bootstrap support value to iTOL, FigTree, MEGA, RAxML, IQ-TREE and MrBayes, so
-an exported dendrogram loaded as an unlengthed cladogram carrying support values
-of 1.0 and 2.0. FigTree compounds it — rerooting assumes the branch
-interpretation, which maps those labels onto the wrong nodes. The failure was
-silent in every case: the file parsed, and drew the wrong tree.
+That is a legal Newick string that every standard parser accepts. Every
+mainstream viewer reads it as something else entirely: a numeric internal label
+is a bootstrap support value to iTOL, FigTree, MEGA, RAxML, IQ-TREE and MrBayes,
+so an exported dendrogram loads as an unlengthed cladogram carrying support
+values of 1.0 and 2.0. FigTree compounds it — rerooting assumes the branch
+interpretation, which maps those labels onto the wrong nodes. In every case, the
+file parsed without error and drew the wrong tree.
 
 The standard conversion goes the other way. R's `ape::as.phylo.hclust` turns
 `hclust` merge heights into edge lengths and `write.tree` emits them as `:`
@@ -68,8 +68,8 @@ fromNewick('((A,B)1.0000,C)2.0000')
 ## Telling the two apart
 
 `fromNewick` parses once with `postParenNumeric: 'name'`, where a `length` can
-only have come from a `:` token. None anywhere means the string carries no
-branch lengths at all, so its post-paren numbers are v4 heights and a second
+only have come from a `:` token. No `:` token anywhere means the string carries
+no branch lengths at all, so its post-paren numbers are v4 heights and a second
 pass re-reads them as lengths.
 
 Deciding on which _nodes_ carry a length would be wrong. `((A,B)E:0.5,C);` is a

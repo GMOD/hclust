@@ -1,4 +1,4 @@
-# Development Guide for @gmod/hclust
+# Development guide for @gmod/hclust
 
 ## Architecture
 
@@ -7,7 +7,7 @@ This package uses a hybrid approach:
 - **WASM (C)**: Distance matrix computation (40-72% faster than JS)
 - **TypeScript**: Tree building, cluster merging, output formatting
 
-### Why This Split?
+### Why the split?
 
 **WASM handles:**
 
@@ -22,11 +22,11 @@ This package uses a hybrid approach:
 - ✅ Output formatting (Newick, JSON, text)
 - ✅ Progress tracking and cancellation
 
-## Performance Benchmarks
+## Performance benchmarks
 
 From a one-off comparison against the pure-JS implementation:
 
-| Samples | JS Baseline | WASM f32 | Improvement |
+| samples | JS baseline | WASM f32 | improvement |
 | ------- | ----------- | -------- | ----------- |
 | 50      | 31.64ms     | 17.30ms  | 45.33%      |
 | 100     | 30.23ms     | 16.74ms  | 44.61%      |
@@ -50,7 +50,7 @@ source ./emsdk_env.sh
 `build:wasm` sources `emsdk_env.sh` itself, from `$EMSDK` or `~/emsdk`, so
 `emcc` does not need to be on your PATH.
 
-### Build Commands
+### Build commands
 
 ```bash
 # Build WASM module only
@@ -67,7 +67,7 @@ A rebuild must reproduce the tracked `src/wasm/distance.js` byte for byte —
 `preversion` runs `pnpm build`, so a bundle that differs lands in a commit
 part-way through a release. Check with `pnpm build:wasm && git status`.
 
-## File Structure
+## File structure
 
 ```
 src/
@@ -89,7 +89,7 @@ scripts/
 Git tracks `distance.js` so that installing the package needs no emscripten.
 There is no separate `.wasm` file — `SINGLE_FILE=1` inlines it.
 
-## C Code Optimizations
+## C code optimizations
 
 The C code includes several optimizations:
 
@@ -98,7 +98,7 @@ The C code includes several optimizations:
 3. **Const pointers** - Allows compiler optimizations
 4. **Inlined operations** - No function call overhead in tight loops
 
-## Emscripten Compiler Flags
+## Emscripten compiler flags
 
 See `scripts/build_wasm.sh` for the full command. The flags worth knowing:
 
@@ -117,7 +117,7 @@ See `scripts/build_wasm.sh` for the full command. The flags worth knowing:
                                    # `web` path via atob + WebAssembly.
 ```
 
-## Future Optimizations
+## Future optimizations
 
 Potential improvements:
 
