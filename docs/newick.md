@@ -22,10 +22,10 @@ toNewick({
 // '((A:1.0000,B:1.0000):1.0000,C:2.0000)'
 ```
 
-Absolute heights round-trip exactly. UPGMA is monotonic — `src/wasm/distance.c`
-clamps the tiny inversions repeated Lance-Williams updates produce on near-tied
-data — so a node's height is the root's minus the lengths on the path down to
-it, and `fromNewick` recovers them that way:
+A round trip through Newick preserves the absolute heights. UPGMA is monotonic —
+`src/wasm/distance.c` clamps the tiny inversions repeated Lance-Williams updates
+produce on near-tied data — so a node's height is the root's minus the lengths
+on the path down to it, and `fromNewick` recovers them that way:
 
 ```js
 fromNewick('((A:1.0000,B:1.0000):1.0000,C:2.0000)')
