@@ -38,17 +38,17 @@ From a one-off comparison against the pure-JS implementation:
 
 ### Prerequisites
 
-Install and activate the Emscripten SDK:
+Install and activate the Emscripten SDK at the version in `.emscripten-version`,
+which CI also reads:
 
 ```bash
-cd ~/emsdk
-./emsdk install latest
-./emsdk activate latest
-source ./emsdk_env.sh
+~/emsdk/emsdk install $(cat .emscripten-version)
+~/emsdk/emsdk activate $(cat .emscripten-version)
 ```
 
 `build:wasm` sources `emsdk_env.sh` itself, from `$EMSDK` or `~/emsdk`, so
-`emcc` does not need to be on your PATH.
+`emcc` does not need to be on your PATH. It refuses to build under any other
+emcc version, because a different emscripten emits different JS.
 
 ### Build commands
 
@@ -63,9 +63,10 @@ pnpm build
 pnpm clean
 ```
 
-A rebuild must reproduce the tracked `src/wasm/distance.js` byte for byte —
-`preversion` runs `pnpm build`, so a bundle that differs lands in a commit
-part-way through a release. Check with `pnpm build:wasm && git status`.
+A rebuild must reproduce the tracked `src/wasm/distance.js` byte for byte.
+`pnpm check:wasm` fails if `src/wasm` differs from git after a build; CI and
+`preversion` run it right after `pnpm build`, so a `distance.c` change can't
+land or ship without its regenerated bundle.
 
 ## File structure
 
@@ -83,6 +84,7 @@ src/
 └── index.ts                # Package exports
 scripts/
 ├── build_wasm.sh           # WASM build script
+├── check-wasm.sh           # Fails if src/wasm differs from a fresh build
 └── regen-v304-snapshots.ts # Regenerates the v3.0.4 comparison fixtures
 ```
 
@@ -134,7 +136,7 @@ Potential improvements:
 pnpm test
 
 # Everything CI runs, in CI's order
-pnpm lint && pnpm format:check && pnpm typecheck && pnpm test --run && pnpm build
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm check:wasm && pnpm test --run && pnpm test:pack
 ```
 
 Some tests compare against fixtures captured from v3.0.4. If the output format

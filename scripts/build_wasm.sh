@@ -1,15 +1,22 @@
 #!/bin/bash
 set -e
 
-echo "Building WASM module for clustering..."
+cd "$(dirname "$0")/.."
+EXPECTED_EMCC_VERSION="$(cat .emscripten-version)"
 
-# Source emscripten environment
 source "${EMSDK:-$HOME/emsdk}/emsdk_env.sh"
 
-# Navigate to the wasm directory
-cd "$(dirname "$0")/../src/wasm"
+EMCC_VERSION="$(emcc --version 2>/dev/null | head -1 | sed -E 's/.* ([0-9]+\.[0-9]+\.[0-9]+) .*/\1/')"
+if [ "$EMCC_VERSION" != "$EXPECTED_EMCC_VERSION" ]; then
+  echo "Error: emcc $EMCC_VERSION found, but .emscripten-version pins $EXPECTED_EMCC_VERSION." >&2
+  echo "Install it with: ~/emsdk/emsdk install $EXPECTED_EMCC_VERSION && ~/emsdk/emsdk activate $EXPECTED_EMCC_VERSION" >&2
+  exit 1
+fi
 
-# Compile C to WASM with inline base64
+echo "Building WASM module for clustering with emcc $EMCC_VERSION..."
+
+cd src/wasm
+
 emcc distance.c \
   -O3 \
   -msimd128 \
@@ -26,9 +33,12 @@ emcc distance.c \
   -s SINGLE_FILE=1 \
   -o distance.js
 
-sed -i.bak 's/var _scriptName=import\.meta\.url;/var _scriptName="";/' distance.js
+SCRIPT_NAME='var _scriptName=import\.meta\.url;'
+if ! grep -q "$SCRIPT_NAME" distance.js; then
+  echo "Error: distance.js has no '$SCRIPT_NAME' to patch; emscripten's output changed." >&2
+  exit 1
+fi
+sed -i.bak "s/$SCRIPT_NAME/var _scriptName=\"\";/" distance.js
 rm distance.js.bak
 
-echo "WASM module built successfully!"
-echo "Output file (with inlined WASM):"
-echo "  - src/wasm/distance.js"
+echo "Built src/wasm/distance.js"

@@ -15,10 +15,12 @@ jobs:
         with:
           node-version: 24.x
           cache: pnpm
+      - id: emsdk
+        run: echo "version=$(cat .emscripten-version)" >> "$GITHUB_OUTPUT"
       - name: Install Emscripten
         uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
-          version: 6.0.6
+          version: ${{ steps.emsdk.outputs.version }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       # eslint doesn't enforce formatting, so without this the tree drifts out
@@ -30,6 +32,7 @@ jobs:
       # or a changed signature and go on passing by testing nothing.
       - run: pnpm typecheck
       - run: pnpm build
+      - run: pnpm check:wasm
       - run: pnpm test --run
       # `pnpm test` runs against src/, so it cannot see the shape of the
       # published package. This packs and installs it, and clusters through
@@ -52,10 +55,12 @@ jobs:
           node-version: 24.x
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
+      - id: emsdk
+        run: echo "version=$(cat .emscripten-version)" >> "$GITHUB_OUTPUT"
       - name: Install Emscripten
         uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
-          version: 6.0.6
+          version: ${{ steps.emsdk.outputs.version }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: npm publish --access public
