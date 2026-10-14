@@ -47,12 +47,13 @@ Through v4 `toNewick` put the height in the internal node's _label_ instead:
 ((A,B)1.0000,C)2.0000
 ```
 
-The v4 string is legal Newick, and every standard parser accepts it. iTOL,
-FigTree, MEGA, RAxML, IQ-TREE and MrBayes read a numeric internal label as a
-bootstrap support value, so an exported dendrogram loads as a cladogram with no
-branch lengths and support values of 1.0 and 2.0. FigTree's rerooting also
-assumes the branch interpretation, which maps those labels onto the wrong nodes.
-In every case the file parsed without error and the viewer drew the wrong tree.
+The v4 string is legal Newick, and every standard parser accepts it. Every
+mainstream viewer reads it as something else: a numeric internal label is a
+bootstrap support value to iTOL, FigTree, MEGA, RAxML, IQ-TREE and MrBayes, so
+an exported dendrogram loads as a cladogram with no branch lengths and support
+values of 1.0 and 2.0. FigTree's rerooting also assumes the branch
+interpretation, which maps those labels onto the wrong nodes. In every case the
+file parsed without error and the viewer drew the wrong tree.
 
 The standard conversion writes lengths. R's `ape::as.phylo.hclust` turns
 `hclust` merge heights into edge lengths and `write.tree` emits them as `:`
@@ -76,8 +77,8 @@ Deciding per _node_, by whether that node has a length, would be wrong.
 `((A,B)E:0.5,C);` is a phylogeny whose leaves have no lengths, and reading `0.5`
 as an absolute height inverts it.
 
-A real phylogeny with bootstrap values parses correctly, because the tree also
-has `:` lengths:
+A real phylogeny is safe either way, because its bootstrap values sit in a tree
+that does have `:` lengths:
 
 ```js
 fromNewick('((A:1,B:1)95,(C:1,D:1)80);')

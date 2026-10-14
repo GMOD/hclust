@@ -21,7 +21,7 @@ API: `clusterData`, `order` and `clustersGivenK` are greenelab's names, and
 `clustersGivenK` keeps its meaning, except for an empty slot at index 0 that
 greenelab returns and this package drops.
 
-Most of greenelab's time goes to average linkage, which it computes from the
+greenelab's cost centre is average linkage, which it computes from the
 definition: the mean distance over every cross-pair of two clusters' members,
 recomputed from the point-distance matrix each time it weighs a pair. One
 find-minimum pass over `k` clusters reads
@@ -45,7 +45,7 @@ point distances in a flat `float32[N × N]` matrix and member lists in flat `int
 arrays.
 
 **2504 × 3105: 94 s → 27 s (3.4×)**, greenelab in node against the port compiled
-natively. The gain is a constant factor, because the port makes the same ~N³/2
+natively. The gain is purely a constant factor: the port makes the same ~N³/2
 lookups, each now one contiguous float read. The rest was structural. Per merge,
 the port `malloc`s an index array, `memcpy`s both children in, frees both, then
 compacts the cluster array by shifting everything past the two removed.
@@ -295,7 +295,7 @@ call.
 (`25fb205`, `c896acb`, `e6ed69e`) with `cc -O2` and a stub `emscripten.h`,
 renaming its two exported symbols so all three link into one harness and run
 against the same buffers in the same process. It reports the best of 3 runs per
-cell, so run it on AC power. It defaults to the two 2504-sample windows narrow
+cell. Run it on AC power. It defaults to the two 2504-sample windows narrow
 enough for generation 1 to finish a run in under a minute.
 
 `bench:greenelab` installs `@greenelab/hclust@0.0.1` into a gitignored `build/`
