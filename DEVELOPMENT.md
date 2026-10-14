@@ -2,25 +2,52 @@
 
 ## Architecture
 
-The package splits the work between C compiled to WebAssembly and TypeScript:
+C compiled to WebAssembly does the numeric work, and TypeScript drives it and
+builds the output:
 
-- **WASM (C)**: Distance matrix computation (40-72% faster than JS)
-- **TypeScript**: Tree building, cluster merging, output formatting
+- **C (`src/wasm/distance.c`)**: input validation, the distance matrix and the
+  UPGMA merge loop
+- **TypeScript**: copying input into the wasm heap, stepping and cancelling a
+  run, rebuilding the tree, and output formatting
 
-### Why the split?
+### C
 
-**WASM handles:**
+Each run is a heap-allocated `Run` struct, so concurrent runs share no state.
+`clusterBeginRows` or `clusterBeginMatrix` allocates one, the caller writes the
+input to the pointer `clusterInput` returns, and each
+`clusterStep(run, budgetMs)` call advances the run through these phases until
+the budget runs out:
 
-- `euclideanDistance()` - Tight numeric loops
-- `computeDistanceMatrix()` - O(n²) computation bottleneck
-- `averageDistance()` - Called many times during clustering
+1. `validateRows` rejects a NaN or Infinity in the rows.
+2. `fillDistances` writes the upper triangle of the Euclidean distance matrix.
+   It hands `distanceRowChunk` at most 256 pairs at a time, and
+   `distanceRowChunk` runs the SIMD kernel `euclideanDistance` on each pair.
+3. `mirrorDistances` copies the upper triangle into the lower one, checking a
+   precomputed matrix for non-finite values on the way.
+4. `seedNearest` caches each slot's nearest active neighbour in `nn`.
+5. `mergeAll` calls `mergeStep` once per merge. A step picks the closest pair
+   from the cached neighbours, records it, applies the Lance-Williams update to
+   the matrix in place, and refreshes the cache.
 
-**JavaScript/TypeScript handles:**
+A run over a precomputed matrix starts at phase 3. Each phase counts its work
+and reads the clock once per `WORK_PER_CLOCK_READ` units, except the merge
+phase, which reads it after every merge. `clusterProgress` exposes the phase and
+counts for `onProgress`, `clusterMerges` returns the heights, `mergeA` and
+`mergeB` arrays, and `clusterFree` releases the run.
 
-- Tree structure manipulation (dynamic objects/arrays)
-- Cluster merging logic
-- Output formatting (Newick, JSON, text)
-- Progress tracking and cancellation
+### TypeScript
+
+- `cluster.ts`: `clusterData` and `clusterObject`, and the lazy `clustersGivenK`
+  getter, which replays the merge sequence.
+- `wasm-wrapper.ts`: `hierarchicalClusterWasm` checks that the input fits the
+  2GB heap, copies it in, calls `clusterStep` in 50ms slices, reports progress
+  at most every 100ms and checks the abort signal between slices. `rebuildTree`
+  turns the merge sequence into a `ClusterNode` tree and the leaf order, placing
+  the smaller subtree on the left at each merge.
+- `yield-task.ts`: the task a run yields to between slices; see
+  [docs/cancellation.md](docs/cancellation.md).
+- `tree-utils.ts`: `toNewick`, `fromNewick`, `quoteName`, `treeToJSON` and
+  `printTree`.
 
 ## Performance benchmarks
 
@@ -93,12 +120,21 @@ There is no separate `.wasm` file — `SINGLE_FILE=1` inlines it.
 
 ## C code optimizations
 
-The C code includes several optimizations:
+[docs/optimizations.md](docs/optimizations.md) has the history and measurements
+behind these:
 
-1. **Loop unrolling** - `euclideanDistance()` unrolls by 4
-2. **Float32** - Uses `float` instead of `double` for better cache usage
-3. **Const pointers** - Allows compiler optimizations
-4. **Inlined operations** - No function call overhead in tight loops
+1. **SIMD**: `euclideanDistance()` subtracts and squares in `f32x4` and
+   accumulates in `f64x2` every 16 elements, built with `-msimd128`.
+2. **Float storage, double arithmetic**: the input and distance matrix are
+   `float`, while the distance sum and the Lance-Williams update run in
+   `double`, so N−1 chained updates don't accumulate float32 rounding error.
+3. **Cached nearest neighbours**: find-minimum scans one cached candidate per
+   cluster rather than every pair.
+4. **Separate functions for V8's tiering**: `distanceRowChunk` and `mergeStep`
+   are `noinline`, so V8 promotes them out of its baseline tier on call count
+   during the first run.
+5. **Restrict pointers**: `euclideanDistance()` takes
+   `const float* __restrict__` operands.
 
 ## Emscripten compiler flags
 
@@ -123,7 +159,6 @@ See `scripts/build_wasm.sh` for the full command. The flags worth knowing:
 
 Potential improvements:
 
-- [ ] SIMD vectorization for distance calculations
 - [ ] Parallel distance matrix computation
 - [ ] Incremental clustering for very large datasets
 - [ ] Additional linkage methods (single, complete, ward)
