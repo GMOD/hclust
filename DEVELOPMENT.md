@@ -2,7 +2,7 @@
 
 ## Architecture
 
-This package uses a hybrid approach:
+The package splits the work between C compiled to WebAssembly and TypeScript:
 
 - **WASM (C)**: Distance matrix computation (40-72% faster than JS)
 - **TypeScript**: Tree building, cluster merging, output formatting
@@ -11,16 +11,16 @@ This package uses a hybrid approach:
 
 **WASM handles:**
 
-- ✅ `euclideanDistance()` - Tight numeric loops
-- ✅ `computeDistanceMatrix()` - O(n²) computation bottleneck
-- ✅ `averageDistance()` - Called many times during clustering
+- `euclideanDistance()` - Tight numeric loops
+- `computeDistanceMatrix()` - O(n²) computation bottleneck
+- `averageDistance()` - Called many times during clustering
 
 **JavaScript/TypeScript handles:**
 
-- ✅ Tree structure manipulation (dynamic objects/arrays)
-- ✅ Cluster merging logic
-- ✅ Output formatting (Newick, JSON, text)
-- ✅ Progress tracking and cancellation
+- Tree structure manipulation (dynamic objects/arrays)
+- Cluster merging logic
+- Output formatting (Newick, JSON, text)
+- Progress tracking and cancellation
 
 ## Performance benchmarks
 
@@ -140,8 +140,8 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm build && pnpm check:was
 ```
 
 Some tests compare against fixtures captured from v3.0.4. If the output format
-changes deliberately, regenerate them — `scripts/regen-v304-snapshots.ts`
-carries the three commands at the top of the file.
+changes deliberately, regenerate them with the three commands listed at the top
+of `scripts/regen-v304-snapshots.ts`.
 
 ## Benchmarking
 
@@ -158,9 +158,9 @@ pnpm bench:greenelab     # the original JS implementation vs the shipped wasm
 pnpm bench:real [vcf.gz]
 ```
 
-All three read the bundled 1000 Genomes slice in `benchmarks/data/` (2504
-samples, 1 Mb of chr22) through `scripts/real-matrices.mjs`, with no tools
-beyond node. `bench:generations` also needs a host `cc`, not emscripten.
-`bench:greenelab` installs its baseline into a gitignored `build/` on first run
-and takes about an hour over every case; pass case indices to run a subset.
-`bench:real` takes a couple of minutes.
+`bench:generations`, `bench:greenelab` and `bench:real` read the bundled 1000
+Genomes slice in `benchmarks/data/` (2504 samples, 1 Mb of chr22) through
+`scripts/real-matrices.mjs`, with no tools beyond node. `bench:generations` also
+needs a host `cc`, not emscripten. `bench:greenelab` installs its baseline into
+a gitignored `build/` on first run and takes about an hour over every case; pass
+case indices to run a subset. `bench:real` takes a couple of minutes.

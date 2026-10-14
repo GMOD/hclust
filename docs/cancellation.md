@@ -32,12 +32,12 @@ the page sent it.
 
 ## How each environment yields
 
-The abort only lands if the task the run yields to lets a posted message or a
-timer run first.
+An abort takes effect only if the task the run yields to lets a posted message
+or a timer run first.
 
-- **Browsers, workers, Electron**: a `MessageChannel` task. Not
-  `scheduler.yield()`: Chromium runs its continuation ahead of posted messages,
-  and a worker loop yielding that way every 50ms ran 3.3s past an abort to
+- **Browsers, workers, Electron**: a `MessageChannel` task. The run does not use
+  `scheduler.yield()`, because Chromium runs its continuation ahead of posted
+  messages. A worker loop yielding that way every 50ms ran 3.3s past an abort to
   completion, where the `MessageChannel` loop stopped within 23ms.
 - **Node**: `setImmediate`. A MessagePort turn in Node runs no due timer, so a
   test that aborts from a `setTimeout` would never see it; `setImmediate` passes
