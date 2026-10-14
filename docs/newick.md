@@ -55,9 +55,8 @@ values of 1.0 and 2.0. FigTree's rerooting also assumes the branch
 interpretation, which maps those labels onto the wrong nodes. In every case the
 file parsed without error and the viewer drew the wrong tree.
 
-The standard conversion writes lengths. R's `ape::as.phylo.hclust` turns
-`hclust` merge heights into edge lengths and `write.tree` emits them as `:`
-lengths.
+The standard conversion, R's `ape::as.phylo.hclust`, turns `hclust` merge
+heights into edge lengths, and `write.tree` emits them as `:` lengths.
 
 `fromNewick` still reads the v4 form, so a stored string keeps working:
 

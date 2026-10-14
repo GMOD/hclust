@@ -2,16 +2,16 @@
 
 Clustering the 2,504 samples of 1000 Genomes by genotype over a 100 kb window
 (3,105 variant columns) took 94 seconds with the JavaScript library JBrowse
-first shipped, and takes 2.3 seconds now, **41× faster**. The ratio depends on
-the window width. The merge loop went from most of a minute to a fraction of a
-second, but the distance build got under 10× faster, and the wider the window,
-the larger the share of the run the distance build takes. Across the windows in
-[Results](#results), the end-to-end gain runs from 8× at 22,513 columns, where
-the distance build is nearly the whole run, to 93× for 5,008 haplotypes at 2,311
-columns, where greenelab's merge is most of its run.
+first shipped, and takes 2.3 seconds now, **41× faster**. The merge loop went
+from most of a minute to a fraction of a second, but the distance build got
+under 10× faster, so the ratio shrinks as a wider window gives the distance
+build a larger share of the run. Across the windows in [Results](#results), the
+end-to-end gain runs from 8× at 22,513 columns, where the distance build is
+nearly the whole run, to 93× for 5,008 haplotypes at 2,311 columns, where
+greenelab's merge is most of its run.
 
-The changes follow, in order. Every number is measured on real genotypes; see
-[Methodology](#methodology).
+The sections below give the changes in order, with every number measured on real
+genotypes; see [Methodology](#methodology).
 
 ## Starting point: greenelab/hclust
 
@@ -46,9 +46,10 @@ arrays.
 
 **2504 × 3105: 94 s → 27 s (3.4×)**, greenelab in node against the port compiled
 natively. The gain is purely a constant factor: the port makes the same ~N³/2
-lookups, each now one contiguous float read. The rest was structural. Per merge,
-the port `malloc`s an index array, `memcpy`s both children in, frees both, then
-compacts the cluster array by shifting everything past the two removed.
+lookups, each now one contiguous float read. The rest of its cost was structural
+work per merge, which `malloc`s an index array, `memcpy`s both children in,
+frees both, then compacts the cluster array by shifting everything past the two
+removed.
 
 ## 2. Lance-Williams, stable slots, active list
 
@@ -120,11 +121,11 @@ At 2,357 columns the same generation takes 3.6 s, 74% of the time for 76% of the
 columns, so the time is proportional to the column count, as it is when the
 distance build is the whole run. Steps 6 and 7 speed up the distance build.
 
-Step 4 also changed one behaviour. Pairs tied on _both_ distance and combined
-size used to fall to `activeList` order, which swap-with-last removal leaves
-arbitrary; slot id now breaks the final tie, making the choice canonical. The
-v3.0.4 snapshots, including the tie-heavy `sparse-duplicates` datasets, pass
-unchanged.
+Step 4 also changed how the merge loop breaks a tie on _both_ distance and
+combined size. Such pairs used to fall to `activeList` order, which
+swap-with-last removal leaves arbitrary; slot id now breaks the final tie,
+making the choice canonical. The v3.0.4 snapshots, including the tie-heavy
+`sparse-duplicates` datasets, pass unchanged.
 
 ## 5. Stop reading the clock per pair
 
@@ -152,8 +153,8 @@ slice of real genotypes (`benchmarks/data/`), each case in a fresh process.
 
 Each case needs a fresh process, because the first `clusterData` call in a
 process ran the distance build at 1.05 G pair-elements/s and every later one at
-1.95. Node `--no-liftoff` closed the gap. V8 promotes a wasm function out of its
-Liftoff baseline tier on call count and has no on-stack replacement, and
+1.95, a gap that node `--no-liftoff` closed. V8 promotes a wasm function out of
+its Liftoff baseline tier on call count and has no on-stack replacement, and
 `hierarchicalCluster` did the whole build in one call, so the first call stayed
 baseline to the end. A best-of-N benchmark in one process hides the first-call
 cost, as omitting the callback hid the cost step 5 removed. Chrome tiers the
@@ -197,12 +198,12 @@ each a first call in a fresh process:
 | 1 Mb window, MAF 0, samples       | 2504 × 22513 |   251.7 s |  30.5 s |      8× |
 | 1 Mb window, MAF 0, haplotypes    | 5008 × 22382 |  1177.4 s |  73.6 s |     16× |
 
-Two costs set the ratio. greenelab's merge is O(N³) and ignores the columns, so
-it dominates the narrow windows, where doubling the rows costs greenelab about
-9×; there the speedup is the merge's, and it is largest. The distance build is
-O(N²V) in both implementations, which differ there only in kernel and runtime,
-so the 22,513-column samples window, nearly all distance build in both, has a
-speedup close to the distance build's alone.
+greenelab's merge is O(N³) and ignores the columns, so it dominates the narrow
+windows, where doubling the rows costs greenelab about 9×; there the speedup is
+the merge's, and it is largest. The distance build is O(N²V) in both
+implementations, which differ there only in kernel and runtime, so the
+22,513-column samples window, nearly all distance build in both, has a speedup
+close to the distance build's alone.
 
 Three C generations, compiled natively, same matrices, best of 3 runs (ms):
 
@@ -248,20 +249,20 @@ invalidates many cached entries, and each of those clusters rescans.
 
 Memory, rather than time, limits the input size. The distance matrix is a full
 N×N float32: 400MB at N=10,000, 1.6GB at N=20,000, against a 2GB heap cap
-(`MAXIMUM_MEMORY` in `scripts/build_wasm.sh`). N=20,000 fits. At N=24,000 the
-allocation fails, and the error reports the size it could not get rather than a
-bare "aborted". Storing only the upper triangle would halve the matrix and
-roughly double that ceiling, at the cost of strided access, because the merge
-loop reads both `[i][j]` and the mirrored `[j][i]`.
+(`MAXIMUM_MEMORY` in `scripts/build_wasm.sh`). N=20,000 fits, while at N=24,000
+the allocation fails with an error that reports the size it could not get rather
+than a bare "aborted". Storing only the upper triangle would halve the matrix
+and roughly double that ceiling, at the cost of strided access, because the
+merge loop reads both `[i][j]` and the mirrored `[j][i]`.
 
-At real widths the distance matrix build is the run. At the thousands of columns
-JBrowse passes, it takes 97 to 100% of the time, and step 7's kernel is the
-current version of it: `f32x4` subtract and square, `f64x2` accumulate every 16
-elements, ~3.5 G pair-elements/s single threaded. The remaining options are
-memory-level parallelism and the GPU. A compute shader doing the same Euclidean
-build, one thread per pair with no tiling, ran 6 to 12× faster than the step 7
-kernel (12 to 19× faster than 5.0.0) on the bundled 1000 Genomes matrices
-(measured in jbrowse-components, `browser-tests/probe-gpu-distance-matrix.ts`).
+At the thousands of columns JBrowse passes, the distance matrix build takes 97
+to 100% of the time, and step 7's kernel is the current version of it: `f32x4`
+subtract and square, `f64x2` accumulate every 16 elements, ~3.5 G
+pair-elements/s single threaded. The remaining options are memory-level
+parallelism and the GPU. A compute shader doing the same Euclidean build, one
+thread per pair with no tiling, ran 6 to 12× faster than the step 7 kernel (12
+to 19× faster than 5.0.0) on the bundled 1000 Genomes matrices (measured in
+jbrowse-components, `browser-tests/probe-gpu-distance-matrix.ts`).
 
 `clusterData({ distances })` takes that matrix and runs only the merge loop on
 it. The build here writes the upper triangle and the merge entry mirrors it, so
