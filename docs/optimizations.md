@@ -17,9 +17,9 @@ genotypes; see [Methodology](#methodology).
 
 JBrowse clustered with [greenelab/hclust](https://github.com/greenelab/hclust),
 a pure-JS AGNES implementation linking on `avgDistance`. This package keeps its
-API: `clusterData`, `order` and `clustersGivenK` are greenelab's names, and
-`clustersGivenK` keeps its meaning, except for an empty slot at index 0 that
-greenelab returns and this package drops.
+API: `clusterData`, `order` and `clustersGivenK` are inherited names, and
+`clustersGivenK` keeps its meaning (modulo an empty slot at index 0 that
+greenelab returns and this package drops).
 
 greenelab's cost centre is average linkage, which it computes from the
 definition: the mean distance over every cross-pair of two clusters' members,
@@ -131,12 +131,12 @@ making the choice canonical. The v3.0.4 snapshots, including the tie-heavy
 
 _`ac57be9`, Aug 2026._
 
-Every benchmark of the time ran without a progress callback, so none of them
-measured the largest cost on the path JBrowse uses. With `onProgress`
-registered, the distance-matrix loop called `emscripten_get_now()`, a wasm→JS
-call, once per pair, purely to check whether 100ms had elapsed. The guard cost
-several times more than the distance it guarded, and more than doubled the call.
-Reading the clock every 1024th pair instead removed the cost.
+Every benchmark of the time ran without a progress callback, which hid the
+largest cost on the path JBrowse uses. With `onProgress` registered, the
+distance-matrix loop called `emscripten_get_now()`, a wasm→JS call, once per
+pair, purely to check whether 100ms had elapsed. The guard cost several times
+more than the distance it guarded, and more than doubled the call. Polling the
+clock every 1024th pair removed the cost.
 
 A benchmark that omits an optional argument measures a different configuration
 than the caller's. `benchmarks/cluster.bench.ts` now runs both paths, so the
@@ -147,9 +147,9 @@ benchmark output shows the next divergence between them.
 _Aug 2026._ Steps 1 to 5 were developed against 20-column synthetic data, where
 the merge loop is the cost. JBrowse hands over one column per variant site in
 the window, which on a 1000 Genomes window at the default filters is 2,000 to
-22,000 columns. At those widths the distance build is 97 to 100% of the run and
-the merge loop is ~40 ms. `pnpm bench:real` measures those widths on a bundled
-slice of real genotypes (`benchmarks/data/`), each case in a fresh process.
+22,000 columns; there the distance build is 97 to 100% of the run and the merge
+loop is ~40 ms. `pnpm bench:real` runs that regime on a bundled slice of real
+genotypes (`benchmarks/data/`), each case in a fresh process.
 
 Each case needs a fresh process, because the first `clusterData` call in a
 process ran the distance build at 1.05 G pair-elements/s and every later one at
@@ -240,7 +240,7 @@ i9-9980HK laptop, single threaded, and the rows vary with thermal state (the
 number. We discarded a run taken while other work shared the CPU, because it
 came out 2 to 3× slower across the board.
 
-## Remaining costs
+## What still costs
 
 Tied input, meaning data with many identical rows such as sparse coverage
 vectors or genotypes over a narrow window, gains far less from step 4 than
