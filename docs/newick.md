@@ -39,7 +39,7 @@ fromNewick('((A:1.0000,B:1.0000):1.0000,C:2.0000)')
 // ] }
 ```
 
-## What v4 wrote, and why it changed
+## Viewers read v4's height labels as bootstrap values
 
 Through v4 `toNewick` put the height in the internal node's _label_ instead:
 
@@ -65,7 +65,7 @@ fromNewick('((A,B)1.0000,C)2.0000')
 // same tree as above — root height 2, inner node 1, leaves 0
 ```
 
-## Telling the two apart
+## `fromNewick` reads a string with no `:` as v4
 
 `fromNewick` parses once with `postParenNumeric: 'name'`, where a `length` can
 only have come from a `:` token. A string with no `:` token has no branch
