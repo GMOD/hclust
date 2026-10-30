@@ -139,8 +139,7 @@ more than the distance it guarded, and more than doubled the call. Polling the
 clock every 1024th pair removed the cost.
 
 A benchmark that omits an optional argument measures a different configuration
-than the caller's. `benchmarks/cluster.bench.ts` now runs both paths, so the
-benchmark output shows the next divergence between them.
+than the caller's. `pnpm bench:real` passes `onProgress`, as JBrowse does.
 
 ## 6. Real widths, and the first call
 

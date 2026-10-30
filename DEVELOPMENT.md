@@ -181,9 +181,6 @@ of `scripts/regen-v304-snapshots.ts`.
 ## Benchmarking
 
 ```bash
-# Current build, callback and tied-input regimes included
-pnpm bench
-
 # The tables in docs/optimizations.md, all of which regenerate
 pnpm bench:generations   # three C generations, compiled from their commits
 pnpm bench:greenelab     # the original JS implementation vs the shipped wasm
