@@ -6,11 +6,9 @@ import tseslint from 'typescript-eslint'
 export default defineConfig(
   {
     ignores: [
-      'webpack.config.js',
       'dist/*',
       'vitest.config.ts',
       'esm/*',
-      'example/*',
       'eslint.config.mjs',
       'src/wasm/distance.js',
       'src/distance.js',

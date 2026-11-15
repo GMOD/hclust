@@ -3,9 +3,9 @@
 // v304-datasets.ts. To regenerate, see scripts/regen-v304-snapshots.ts.
 import { describe, expect, it } from 'vitest'
 
+import { clusterData } from '../src/cluster.ts'
 import { datasets } from './v304-datasets.ts'
 import snapshots from './v304-snapshots.json' with { type: 'json' }
-import { clusterData } from '../src/cluster.ts'
 
 import type { ClusterNode } from '../src/types.ts'
 
